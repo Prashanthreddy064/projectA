@@ -641,14 +641,14 @@ tr:hover td { background: rgba(255,255,255,0.015); }
         <label style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;">Hour Filter</label>
         <select id="pp-hour-filter" onchange="renderPickPath()"
           style="background:#0f1a2e;border:1px solid #1e293b;border-radius:6px;color:var(--text);font-size:12px;padding:6px 12px;cursor:pointer;">
-          <option value="all">Full Operational Window (6:00 AM - 1:00 AM)</option>
+          <option value="all">Full Operational Window (6:00 AM - 2:00 AM)</option>
           <option value="6">6 AM</option><option value="7">7 AM</option><option value="8">8 AM</option>
           <option value="9">9 AM</option><option value="10">10 AM</option><option value="11">11 AM</option>
           <option value="12">12 PM</option><option value="13">1 PM</option><option value="14">2 PM</option>
           <option value="15">3 PM</option><option value="16">4 PM</option><option value="17">5 PM</option>
           <option value="18">6 PM</option><option value="19">7 PM</option><option value="20">8 PM</option>
           <option value="21">9 PM</option><option value="22">10 PM</option><option value="23">11 PM</option>
-          <option value="24">12 AM</option><option value="25">1 AM</option>
+          <option value="24">12 AM</option><option value="25">1 AM</option><option value="26">2 AM</option>
         </select>
       </div>
       <div id="pp-kpis" style="display:flex;gap:10px;flex-wrap:wrap;margin-left:auto;"></div>
@@ -2676,7 +2676,7 @@ function populatePickerHourFilter(user) {
   if(!sel) return;
 
   if(!user) {
-    sel.innerHTML = '<option value="all">Full Operational Window (6:00 AM - 1:00 AM)</option>';
+    sel.innerHTML = '<option value="all">Full Operational Window (6:00 AM - 2:00 AM)</option>';
     sel.value = 'all';
     return;
   }
@@ -2705,7 +2705,7 @@ function populatePickerHourFilter(user) {
 
 function getOperationalHourRange() {
   const hours = [];
-  for(let h = 6; h <= 25; h++) hours.push(h);
+  for(let h = 6; h <= 26; h++) hours.push(h);
   return hours;
 }
 
@@ -2770,7 +2770,7 @@ function buildPickerHourlySeries(rows) {
     const inactiveEnd = nextMin;
     while(inactiveStart < inactiveEnd) {
       const opHour = Math.floor(inactiveStart / 60);
-      if(opHour < 6 || opHour > 25) break;
+      if(opHour < 6 || opHour > 26) break;
       const nextBoundary = (opHour + 1) * 60;
       const segmentEnd = Math.min(nextBoundary, inactiveEnd);
       const segment = Math.max(0, segmentEnd - inactiveStart);
@@ -2862,8 +2862,8 @@ function renderPickPath() {
   let rows = txData.filter(r => r.userId === user);
   if(hourFilter !== 'all') {
     const filterHour = parseInt(hourFilter);
-    // Map extended hours: 24→0 (midnight), 25→1 (1 AM)
-    const normalizedFilterHour = filterHour === 24 ? 0 : (filterHour === 25 ? 1 : filterHour);
+    // Map extended hours: 24→0 (midnight), 25→1 (1 AM), 26→2 (2 AM)
+    const normalizedFilterHour = filterHour === 24 ? 0 : (filterHour === 25 ? 1 : (filterHour === 26 ? 2 : filterHour));
     rows = rows.filter(r => r.hour === normalizedFilterHour);
   }
   // Sort by time
@@ -3105,7 +3105,7 @@ function drawPickerHourlyChart(series, selectedHourFilter = null) {
     const unitsX = x + colW * 0.08;
     const inactiveX = x + colW * 0.54;
 
-    const isSelected = selectedHourFilter !== null && opHour === (selectedHourFilter === 24 ? 24 : selectedHourFilter === 25 ? 25 : selectedHourFilter);
+    const isSelected = selectedHourFilter !== null && opHour === (selectedHourFilter === 24 ? 24 : selectedHourFilter === 25 ? 25 : selectedHourFilter === 26 ? 26 : selectedHourFilter);
     if(isSelected) {
       ctx.fillStyle = 'rgba(59,130,246,0.12)';
       ctx.fillRect(x + 1, padT, colW - 2, chartH + 4);
