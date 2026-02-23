@@ -654,7 +654,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
       <div id="pp-kpis" style="display:flex;gap:10px;flex-wrap:wrap;margin-left:auto;"></div>
     </div>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 280px;gap:16px;align-items:start;">
+  <div style="display:grid;grid-template-columns:1fr 360px;gap:16px;align-items:start;">
     <div class="map-wrap" style="position:relative;">
       <canvas id="pp-canvas"></canvas>
       <div style="display:flex;align-items:center;gap:16px;margin-top:10px;font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;">
@@ -671,7 +671,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
       </div>
       <div class="card">
         <div class="card-title" style="font-size:11px;">Hourly Activity</div>
-        <canvas id="pp-hourly-chart" height="160"></canvas>
+        <canvas id="pp-hourly-chart" height="240"></canvas>
       </div>
     </div>
   </div>
@@ -2652,12 +2652,14 @@ function buildPickerList() {
   if(dataSource !== 'dropped' || !txData.length) {
     sel.innerHTML = '<option value="">— Upload data to enable —</option>';
     ppCurrentUser = '';
+    populatePickerHourFilter('');
     return;
   }
   // Gather unique users sorted alphabetically
   const users = [...new Set(txData.map(r => r.userId).filter(u => u && u !== 'Unknown'))].sort();
   sel.innerHTML = '<option value="">— Select a picker —</option>' +
     users.map(u => `<option value="${u}"${u===ppCurrentUser?' selected':''}>${u}</option>`).join('');
+  populatePickerHourFilter(ppCurrentUser);
   if(ppCurrentUser && users.includes(ppCurrentUser)) {
     renderPickPath();
   }
@@ -2665,7 +2667,35 @@ function buildPickerList() {
 
 function onPickerSelect(val) {
   ppCurrentUser = val;
+  populatePickerHourFilter(val);
   renderPickPath();
+}
+
+function populatePickerHourFilter(user) {
+  const sel = document.getElementById('pp-hour-filter');
+  if(!sel) return;
+
+  if(!user) {
+    sel.innerHTML = '<option value="all">Full Operational Window (6:00 AM - 1:00 AM)</option>';
+    sel.value = 'all';
+    return;
+  }
+
+  const workedHours = [...new Set(
+    txData
+      .filter(r => r.userId === user)
+      .map(r => r.hour < 6 ? r.hour + 24 : r.hour)
+  )].sort((a,b) => a-b);
+
+  const previousValue = sel.value;
+  sel.innerHTML = '<option value="all">All Worked Hours</option>' +
+    workedHours.map(opHour => `<option value="${opHour}">${formatOperationalHourLabel(opHour)}</option>`).join('');
+
+  if(previousValue === 'all' || !workedHours.includes(parseInt(previousValue))) {
+    sel.value = 'all';
+  } else {
+    sel.value = previousValue;
+  }
 }
 
   function normalizeOperationalMinute(hour, minute = 0) {
@@ -2688,7 +2718,10 @@ function formatOperationalHourLabel(opHour) {
 }
 
 function buildPickerHourlySeries(rows) {
-  const opHours = getOperationalHourRange();
+  const opHours = [...new Set(rows.map(r => r.hour < 6 ? r.hour + 24 : r.hour))].sort((a,b)=>a-b);
+  if(!opHours.length) {
+    return { opHours: [], unitsByOpHour: {}, inactiveByOpHour: {}, activeByOpHour: {}, uphByOpHour: {} };
+  }
   const unitsByOpHour = Object.fromEntries(opHours.map(h => [h, 0]));
   const inactiveByOpHour = Object.fromEntries(opHours.map(h => [h, 0]));
   const activeByOpHour = Object.fromEntries(opHours.map(h => [h, 0]));
