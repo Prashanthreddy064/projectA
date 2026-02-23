@@ -1170,7 +1170,7 @@ function handleFile(file) {
           if(m) { hour = parseInt(m[1]); minute = parseInt(m[2]); }
         }
         // User ID from col E
-        onst userId = (r[colUser] != null && r[colUser] !== '') ? String(r[colUser]).trim() : 'Unknown';
+        const userId = (r[colUser] != null && r[colUser] !== '') ? String(r[colUser]).trim() : 'Unknown';
         newTx.push({x: isNA ? NaN : x, y: isNA ? NaN : y, units, hour, minute, userId, isNA});
       }
       setProgress(80);
