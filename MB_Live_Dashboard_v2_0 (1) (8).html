@@ -2226,7 +2226,7 @@ function handleFile(file) {
         const orderNumber = (r[colOrder] != null && r[colOrder] !== '') ? String(r[colOrder]).trim() : '';
         const productBrand = (r[colBrand] != null && r[colBrand] !== '') ? String(r[colBrand]).trim() : '';
         const dayOfWeek = (r[colDay] != null && r[colDay] !== '') ? String(r[colDay]).trim() : '';
-        const dropOffLocation = (colDropOff >= 0 && r[colDropOff] != null && r[colDropOff] !== '') ? String(r[colDropOff]).trim() : '';
+        const dropOffLocation = (colDropOff >= 0 && r[colDropOff] != null && r[colDropOff] !== '') ? normalizeDropOffValue(r[colDropOff]) : '';
         newTx.push({x: isNA ? NaN : x, y: isNA ? NaN : y, units, hour, minute, userId, isNA, dateValue, promoType, orderNumber, productBrand, dayOfWeek, dropOffLocation});
       }
       setProgress(80);
@@ -5178,31 +5178,80 @@ function sortByOpHour(a, b) {
   return opHourIndex(a) - opHourIndex(b);
 }
 
+function normalizeDropOffValue(v) {
+  if(v == null || v === '') return '';
+  return String(v).replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
 // ═══════════════════════════════════════════════
 // TENSORFLOW.JS FORECAST MODEL
 // ═══════════════════════════════════════════════
 
-function fcPrepareTrainingData() {
-  // Use main uploaded data (uploadedTxAll) to build training dataset
+function fcPrepareTrainingData(seqLen = 4) {
   if(!uploadedTxAll || !uploadedTxAll.length) return null;
 
-  // Collect unique days and categories
-  const days = [...new Set(uploadedTxAll.map(r => r.dayOfWeek || '').filter(Boolean))];
-  const categories = [...new Set(uploadedTxAll.map(r => r.promoType || '').filter(Boolean))];
-  const zones = [...new Set(uploadedTxAll.map(r => r.zone || '').filter(Boolean))];
+  const days = [...new Set(uploadedTxAll.map(r => r.dayOfWeek || 'Unknown').filter(Boolean))];
+  const categories = [...new Set(uploadedTxAll.map(r => r.promoType || 'Unknown').filter(Boolean))];
+  const brands = [...new Set(uploadedTxAll.map(r => r.productBrand || 'Unknown').filter(Boolean))];
+  const zones = [...new Set(uploadedTxAll.map(r => r.zone || 'No Location').filter(Boolean))];
 
-  // Aggregate by date + hour + day + category + zone
   const agg = {};
   uploadedTxAll.forEach(r => {
-    const key = `${r.dateValue}|${r.hour}|${r.dayOfWeek || 'Unknown'}|${r.promoType || 'Unknown'}|${r.zone || 'No Location'}`;
-    if(!agg[key]) agg[key] = { date: r.dateValue, hour: r.hour, day: r.dayOfWeek || 'Unknown', category: r.promoType || 'Unknown', zone: r.zone || 'No Location', units: 0 };
+    const day = r.dayOfWeek || 'Unknown';
+    const category = r.promoType || 'Unknown';
+    const zone = r.zone || 'No Location';
+    const brand = r.productBrand || 'Unknown';
+    const key = `${r.dateValue}|${r.hour}|${day}|${category}`;
+    if(!agg[key]) {
+      agg[key] = {
+        date: r.dateValue,
+        hour: r.hour,
+        day,
+        category,
+        units: 0,
+        brandCounts: {},
+        zoneCounts: {}
+      };
+    }
     agg[key].units += r.units;
+    agg[key].brandCounts[brand] = (agg[key].brandCounts[brand] || 0) + r.units;
+    agg[key].zoneCounts[zone] = (agg[key].zoneCounts[zone] || 0) + r.units;
   });
 
-  const rows = Object.values(agg);
-  if(!rows.length) return null;
+  const hourlyRows = Object.values(agg).map(r => {
+    const brand = Object.entries(r.brandCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Unknown';
+    const zone = Object.entries(r.zoneCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'No Location';
+    return { date: r.date, hour: r.hour, day: r.day, category: r.category, units: r.units, brand, zone };
+  });
+  if(hourlyRows.length <= seqLen) return null;
 
-  return { rows, days, categories, zones };
+  const byDateCat = {};
+  hourlyRows.forEach(r => {
+    const key = `${r.date}|${r.day}|${r.category}`;
+    if(!byDateCat[key]) byDateCat[key] = [];
+    byDateCat[key].push(r);
+  });
+
+  const samples = [];
+  Object.values(byDateCat).forEach(list => {
+    const sorted = list.slice().sort((a, b) => sortByOpHour(a.hour, b.hour));
+    for(let i = seqLen; i < sorted.length; i++) {
+      const lagUnits = [];
+      for(let l = i - seqLen; l < i; l++) lagUnits.push(sorted[l].units || 0);
+      const target = sorted[i];
+      samples.push({
+        lagUnits,
+        hour: target.hour,
+        day: target.day,
+        category: target.category,
+        units: target.units,
+        brand: target.brand,
+        zone: target.zone
+      });
+    }
+  });
+
+  return samples.length ? { samples, days, categories, brands, zones, seqLen } : null;
 }
 
 function fcOneHotEncode(value, classes) {
@@ -5235,7 +5284,7 @@ async function fcTrainAndForecast() {
   await new Promise(r => setTimeout(r, 50));
 
   try {
-    const prepared = fcPrepareTrainingData();
+    const prepared = fcPrepareTrainingData(4);
     if(!prepared) {
       statusEl.textContent = 'Could not prepare training data';
       btn.disabled = false;
@@ -5243,87 +5292,114 @@ async function fcTrainAndForecast() {
       return;
     }
 
-    const { rows, days, categories, zones } = prepared;
-    const featureSize = 2 + days.length + categories.length;
+    const { samples, days, categories, brands, zones, seqLen } = prepared;
+    const covariateSize = 2 + days.length + categories.length;
 
-    // Build tensors
-    const xs = [];
-    const ys = [];
-    rows.forEach(r => {
-      xs.push(fcBuildFeatureVector(r.hour, r.day, r.category, days, categories));
-      ys.push(r.units);
+    const seqXs = [];
+    const covXs = [];
+    const unitsYs = [];
+    const brandYs = [];
+    const zoneYs = [];
+
+    samples.forEach(s => {
+      seqXs.push(s.lagUnits.map(v => [v]));
+      covXs.push(fcBuildFeatureVector(s.hour, s.day, s.category, days, categories));
+      unitsYs.push(s.units);
+      brandYs.push(fcOneHotEncode(s.brand, brands));
+      zoneYs.push(fcOneHotEncode(s.zone, zones));
     });
 
-    // Normalize targets
-    const maxUnits = Math.max(...ys, 1);
-    const normalizedYs = ys.map(y => y / maxUnits);
+    const maxUnits = Math.max(...unitsYs, 1);
+    const normalizedUnitsYs = unitsYs.map(y => y / maxUnits);
 
-    statusEl.textContent = `Training on ${rows.length} data points (${featureSize} features)...`;
+    statusEl.textContent = `Training on ${samples.length} sequence samples (${seqLen} lag steps)...`;
     await new Promise(r => setTimeout(r, 50));
 
     // Dispose old model if exists
     if(fcModel) { fcModel.dispose(); fcModel = null; }
 
     // Build TensorFlow.js model
-    const model = tf.sequential();
-    model.add(tf.layers.dense({ inputShape: [featureSize], units: 64, activation: 'relu' }));
-    model.add(tf.layers.dense({ units: 32, activation: 'relu' }));
-    model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-    model.add(tf.layers.dense({ units: 1, activation: 'linear' }));
+    const seqInput = tf.input({ shape: [seqLen, 1], name: 'seq_input' });
+    const covInput = tf.input({ shape: [covariateSize], name: 'cov_input' });
 
-    model.compile({
-      optimizer: tf.train.adam(0.005),
-      loss: 'meanSquaredError'
+    const seqBranch = tf.layers.lstm({ units: 32, activation: 'tanh' }).apply(seqInput);
+    const covBranch = tf.layers.dense({ units: 24, activation: 'relu' }).apply(covInput);
+    const merged = tf.layers.concatenate().apply([seqBranch, covBranch]);
+    const shared = tf.layers.dense({ units: 48, activation: 'relu' }).apply(merged);
+
+    const unitsOutput = tf.layers.dense({ units: 1, activation: 'linear', name: 'units_output' }).apply(shared);
+    const brandOutput = tf.layers.dense({ units: brands.length, activation: 'softmax', name: 'brand_output' }).apply(shared);
+    const zoneOutput = tf.layers.dense({ units: zones.length, activation: 'softmax', name: 'zone_output' }).apply(shared);
+
+    const model = tf.model({
+      inputs: [seqInput, covInput],
+      outputs: [unitsOutput, brandOutput, zoneOutput]
     });
 
-    const xTensor = tf.tensor2d(xs);
-    const yTensor = tf.tensor2d(normalizedYs, [normalizedYs.length, 1]);
+    model.compile({
+      optimizer: tf.train.adam(0.003),
+      loss: {
+        units_output: 'meanSquaredError',
+        brand_output: 'categoricalCrossentropy',
+        zone_output: 'categoricalCrossentropy'
+      },
+      lossWeights: {
+        units_output: 1.0,
+        brand_output: 0.5,
+        zone_output: 0.5
+      }
+    });
+
+    const seqTensor = tf.tensor3d(seqXs);
+    const covTensor = tf.tensor2d(covXs);
+    const unitsTensor = tf.tensor2d(normalizedUnitsYs, [normalizedUnitsYs.length, 1]);
+    const brandTensor = tf.tensor2d(brandYs);
+    const zoneTensor = tf.tensor2d(zoneYs);
 
     // Train
-    const history = await model.fit(xTensor, yTensor, {
+    const history = await model.fit(
+      { seq_input: seqTensor, cov_input: covTensor },
+      { units_output: unitsTensor, brand_output: brandTensor, zone_output: zoneTensor },
+      {
       epochs: 100,
-      batchSize: Math.min(64, Math.max(8, Math.floor(rows.length / 4))),
+      batchSize: Math.min(64, Math.max(8, Math.floor(samples.length / 4))),
       validationSplit: 0.15,
       shuffle: true,
       callbacks: {
         onEpochEnd: (epoch, logs) => {
           if(epoch % 20 === 0) {
-            statusEl.textContent = `Epoch ${epoch + 1}/100 — loss: ${logs.loss.toFixed(6)}`;
+            statusEl.textContent = `Epoch ${epoch + 1}/100 — total loss: ${logs.loss.toFixed(6)}`;
           }
         }
       }
     });
 
     fcModel = model;
-    fcTrainingLoss = history.history.loss[history.history.loss.length - 1];
+    fcTrainingLoss = history.history.loss[history.history.loss.length - 1] || 0;
 
     // Store metadata for predictions
-    fcModel._fcMeta = { days, categories, zones, maxUnits, featureSize };
+    fcModel._fcMeta = { days, categories, brands, zones, maxUnits, covariateSize, seqLen };
 
-    // Generate predictions for all combinations and compute R²
-    const allPredXs = [];
-    const allActualYs = [];
-    rows.forEach(r => {
-      allPredXs.push(fcBuildFeatureVector(r.hour, r.day, r.category, days, categories));
-      allActualYs.push(r.units);
-    });
-
-    const predTensor = model.predict(tf.tensor2d(allPredXs));
-    const predValues = (await predTensor.data()).map(v => Math.max(0, v * maxUnits));
-    predTensor.dispose();
+    const predOut = model.predict({ seq_input: seqTensor, cov_input: covTensor });
+    const unitsPredTensor = Array.isArray(predOut) ? predOut[0] : predOut;
+    const predValues = (await unitsPredTensor.data()).map(v => Math.max(0, v * maxUnits));
 
     // R² calculation
-    const meanActual = allActualYs.reduce((s, v) => s + v, 0) / allActualYs.length;
+    const meanActual = unitsYs.reduce((s, v) => s + v, 0) / unitsYs.length;
     let ssRes = 0, ssTot = 0;
-    for(let i = 0; i < allActualYs.length; i++) {
-      ssRes += (allActualYs[i] - predValues[i]) ** 2;
-      ssTot += (allActualYs[i] - meanActual) ** 2;
+    for(let i = 0; i < unitsYs.length; i++) {
+      ssRes += (unitsYs[i] - predValues[i]) ** 2;
+      ssTot += (unitsYs[i] - meanActual) ** 2;
     }
     fcR2 = ssTot > 0 ? 1 - (ssRes / ssTot) : 0;
 
     // Clean up tensors
-    xTensor.dispose();
-    yTensor.dispose();
+    if(Array.isArray(predOut)) predOut.forEach(t => t.dispose());
+    seqTensor.dispose();
+    covTensor.dispose();
+    unitsTensor.dispose();
+    brandTensor.dispose();
+    zoneTensor.dispose();
 
     statusEl.textContent = `Model trained — R²: ${fcR2.toFixed(4)} · Loss: ${fcTrainingLoss.toFixed(6)}`;
 
@@ -5334,7 +5410,7 @@ async function fcTrainAndForecast() {
     const badge = document.getElementById('fc-data-badge');
     badge.className = 'data-badge live';
     badge.textContent = 'MODEL READY';
-    document.getElementById('fc-row-count').textContent = `${rows.length} training samples · ${uploadedTxAll.length} transactions`;
+    document.getElementById('fc-row-count').textContent = `${samples.length} sequence samples · ${uploadedTxAll.length} transactions`;
 
     // Apply filters and render
     fcApplyFiltersAndPredict();
@@ -5352,76 +5428,99 @@ async function fcTrainAndForecast() {
 
 function fcApplyFiltersAndPredict() {
   if(!fcModel || !fcModel._fcMeta) return;
-  const { days, categories, zones, maxUnits } = fcModel._fcMeta;
+  const { days, categories, brands, zones, maxUnits, seqLen } = fcModel._fcMeta;
 
-  // Filter source data by category and day
   let filtered = uploadedTxAll.slice();
   if(fcFilterCat !== 'all') filtered = filtered.filter(r => r.promoType === fcFilterCat);
   if(fcFilterDay !== 'all') filtered = filtered.filter(r => r.dayOfWeek === fcFilterDay);
 
-  // Actual hourly totals
   fcActuals = {};
   FC_HOURS.forEach(h => fcActuals[h] = 0);
   filtered.forEach(r => {
     if(FC_HOURS.includes(r.hour)) fcActuals[r.hour] += r.units;
   });
 
-  // Actual zone totals
   fcZoneActuals = {};
   filtered.forEach(r => {
     const z = r.zone || 'No Location';
     fcZoneActuals[z] = (fcZoneActuals[z] || 0) + r.units;
   });
 
-  // Predict: for each hour, predict with the selected day/category
-  const targetDay = fcFilterDay !== 'all' ? fcFilterDay : (days[0] || 'Unknown');
-  const targetCat = fcFilterCat !== 'all' ? fcFilterCat : (categories[0] || 'Unknown');
-
-  // If "all" is selected, sum predictions across all days/categories
   const dayList = fcFilterDay !== 'all' ? [fcFilterDay] : days;
   const catList = fcFilterCat !== 'all' ? [fcFilterCat] : categories;
 
   fcPredictions = {};
   FC_HOURS.forEach(h => fcPredictions[h] = 0);
   fcZonePredictions = {};
+  const fcBrandPredictions = {};
 
-  const predXs = [];
+  const hourlyAgg = {};
+  uploadedTxAll.forEach(r => {
+    const key = `${r.dayOfWeek || 'Unknown'}|${r.promoType || 'Unknown'}|${r.hour}`;
+    if(!hourlyAgg[key]) hourlyAgg[key] = { units: 0, count: 0 };
+    hourlyAgg[key].units += r.units;
+    hourlyAgg[key].count += 1;
+  });
+
+  const seqXs = [];
+  const covXs = [];
   const predMeta = [];
   dayList.forEach(d => {
     catList.forEach(c => {
       FC_HOURS.forEach(h => {
-        predXs.push(fcBuildFeatureVector(h, d, c, days, categories));
+        const lagUnits = [];
+        const idx = opHourIndex(h);
+        for(let back = seqLen; back >= 1; back--) {
+          const priorOp = idx - back;
+          const priorHour = priorOp >= 24 ? priorOp - 24 : priorOp < 0 ? priorOp + 24 : priorOp;
+          const aKey = `${d}|${c}|${priorHour}`;
+          const avg = hourlyAgg[aKey] ? (hourlyAgg[aKey].units / Math.max(1, hourlyAgg[aKey].count)) : 0;
+          lagUnits.push([avg]);
+        }
+        seqXs.push(lagUnits);
+        covXs.push(fcBuildFeatureVector(h, d, c, days, categories));
         predMeta.push({ hour: h, day: d, category: c });
       });
     });
   });
 
-  if(predXs.length > 0) {
-    const predTensor = fcModel.predict(tf.tensor2d(predXs));
-    const predData = predTensor.dataSync();
-    predTensor.dispose();
+  if(seqXs.length > 0) {
+    const seqTensor = tf.tensor3d(seqXs);
+    const covTensor = tf.tensor2d(covXs);
+    const predOut = fcModel.predict({ seq_input: seqTensor, cov_input: covTensor });
+    const unitsPred = Array.isArray(predOut) ? predOut[0].dataSync() : predOut.dataSync();
+    const brandPred = Array.isArray(predOut) ? predOut[1].arraySync() : [];
+    const zonePred = Array.isArray(predOut) ? predOut[2].arraySync() : [];
 
     predMeta.forEach((m, i) => {
-      const val = Math.max(0, predData[i] * maxUnits);
+      const val = Math.max(0, unitsPred[i] * maxUnits);
       fcPredictions[m.hour] = (fcPredictions[m.hour] || 0) + val;
+
+      const zDist = zonePred[i] || [];
+      zDist.forEach((p, zi) => {
+        const zone = zones[zi];
+        fcZonePredictions[zone] = (fcZonePredictions[zone] || 0) + (val * p);
+      });
+
+      const bDist = brandPred[i] || [];
+      bDist.forEach((p, bi) => {
+        const brand = brands[bi];
+        fcBrandPredictions[brand] = (fcBrandPredictions[brand] || 0) + (val * p);
+      });
     });
+
+    if(Array.isArray(predOut)) predOut.forEach(t => t.dispose());
+    seqTensor.dispose();
+    covTensor.dispose();
   }
 
-  // Distribute zone predictions proportionally based on actual zone distribution
-  const totalActual = Object.values(fcZoneActuals).reduce((s, v) => s + v, 0);
-  const totalPredicted = Object.values(fcPredictions).reduce((s, v) => s + v, 0);
-  zones.forEach(z => {
-    const zoneShare = totalActual > 0 ? (fcZoneActuals[z] || 0) / totalActual : 1 / zones.length;
-    fcZonePredictions[z] = totalPredicted * zoneShare;
-  });
+  zones.forEach(z => { if(fcZonePredictions[z] == null) fcZonePredictions[z] = 0; });
 
-  // Apply hour filter for display
   fcFiltered = filtered;
   if(fcFilterHours.length > 0) {
     fcFiltered = filtered.filter(r => fcFilterHours.includes(r.hour));
   }
 
-  // Render everything
   fcBuildKPIs();
   fcBuildHourlyChart();
   fcBuildStaffingTable();
@@ -5694,7 +5793,7 @@ const FUL_LOCATIONS = new Set(['fuldrop1','dspack','dspack1','dspack2','dspack3'
 
 function classifyDropOffLocation(loc) {
   if(!loc) return 'Unknown';
-  const key = loc.trim().toLowerCase();
+  const key = normalizeDropOffValue(loc).toLowerCase();
   if(MB_LOCATIONS.has(key)) return 'Material Bank';
   if(FUL_LOCATIONS.has(key)) return 'Fulfillment';
   return 'Unknown';
