@@ -1652,7 +1652,8 @@ let selectedOpsDate = '';
 let isOpsDataProcessing = false;
 let pendingShiftBreakdownCalc = false;
 
-const MAX_UPLOAD_FILE_SIZE_MB = 100;
+// Increased upload ceiling so large Drop/Forecast exports with maximum row counts can be processed.
+const MAX_UPLOAD_FILE_SIZE_MB = 250;
 const MAX_UPLOAD_FILE_SIZE_BYTES = MAX_UPLOAD_FILE_SIZE_MB * 1024 * 1024;
 
 function formatDayOfWeek(dateValue) {
