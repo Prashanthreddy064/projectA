@@ -873,7 +873,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="drop-icon">📂</div>
     <div class="drop-text">
       <strong>Drop updated Excel file here</strong>
-      <span>Sheet: "drop the data" · Columns: Time, X, Y, Units, User ID, Date, Day, Category, Order Number, Product Brand, Drop Off Location (Col K)</span>
+      <span>Sheet: "drop the data" · Columns: Time, X, Y, Units, User ID, Date, Day, Category, Order Number, Product Brand, Drop Off Location (Col K) · Max file size: 100 MB</span>
     </div>
   </div>
   <div class="drop-hint" style="min-width:240px;">
@@ -1294,7 +1294,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
       <div class="drop-icon">📂</div>
       <div class="drop-text">
         <strong>Drop updated Excel file here</strong>
-        <span>Sheet: "Forecast Data" · Columns: Actual Start Time, X, Y, Completed Units, User ID, Date, Day, Category</span>
+        <span>Sheet: "Forecast Data" · Columns: Actual Start Time, X, Y, Completed Units, User ID, Date, Day, Category · Max file size: 100 MB</span>
       </div>
     </div>
 
@@ -1651,6 +1651,9 @@ let uploadedTxAll = [];
 let selectedOpsDate = '';
 let isOpsDataProcessing = false;
 let pendingShiftBreakdownCalc = false;
+
+const MAX_UPLOAD_FILE_SIZE_MB = 100;
+const MAX_UPLOAD_FILE_SIZE_BYTES = MAX_UPLOAD_FILE_SIZE_MB * 1024 * 1024;
 
 function formatDayOfWeek(dateValue) {
   if(!dateValue) return '—';
@@ -2031,6 +2034,10 @@ function setProgress(pct) {
 
 function handleFile(file) {
   if(!file) return;
+  if(file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
+    showRefreshToast(`⚠️ File too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum allowed size is ${MAX_UPLOAD_FILE_SIZE_MB} MB.`);
+    return;
+  }
   const fileInput = document.getElementById('file-input');
   if(fileInput) fileInput.value = '';
   isOpsDataProcessing = true;
@@ -5727,6 +5734,10 @@ function fcBuildToggleButtons() {
 // ─── File Parsing ────────────────────────────
 function handleForecastFile(file) {
   if(!file) return;
+  if(file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
+    showRefreshToast(`⚠️ File too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum allowed size is ${MAX_UPLOAD_FILE_SIZE_MB} MB.`);
+    return;
+  }
   const reader = new FileReader();
   reader.onload = e => {
     const wb = XLSX.read(e.target.result, {type:'array', cellDates:true});
