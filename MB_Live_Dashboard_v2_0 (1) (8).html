@@ -872,7 +872,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="drop-icon">📂</div>
     <div class="drop-text">
       <strong>Drop updated Excel file here</strong>
-      <span>Sheet: "drop the data" · Columns: Time, X, Y, Units, User ID, Date, Day, Category, Order Number, Product Brand</span>
+      <span>Sheet: "drop the data" · Columns: Time, X, Y, Units, User ID, Date, Day, Category, Order Number, Product Brand, Order Flow (Col K)</span>
     </div>
   </div>
   <div class="drop-hint" style="min-width:240px;">
@@ -887,9 +887,9 @@ tr:hover td { background: rgba(255,255,255,0.015); }
     <div id="ops-day-value" style="width:100%;margin-top:2px;background:var(--surf1);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;font-size:11px;font-family:'IBM Plex Mono',monospace;min-height:28px;display:flex;align-items:center;">—</div>
   </div>
   <div class="drop-hint">
-    Expected columns (A–J):<br>
+    Expected columns (A–K):<br>
     <strong style="color:var(--cyan)">A</strong> Time · <strong style="color:var(--cyan)">B</strong> X · <strong style="color:var(--cyan)">C</strong> Y · <strong style="color:var(--cyan)">D</strong> Units · <strong style="color:var(--cyan)">E</strong> User ID
-    · <strong style="color:var(--cyan)">F</strong> Date · <strong style="color:var(--cyan)">G</strong> Day · <strong style="color:var(--cyan)">H</strong> Category · <strong style="color:var(--cyan)">I</strong> Order No · <strong style="color:var(--cyan)">J</strong> Brand
+    · <strong style="color:var(--cyan)">F</strong> Date · <strong style="color:var(--cyan)">G</strong> Day · <strong style="color:var(--cyan)">H</strong> Category · <strong style="color:var(--cyan)">I</strong> Order No · <strong style="color:var(--cyan)">J</strong> Brand · <strong style="color:var(--cyan)">K</strong> Order Flow
   </div>
 </div>
 
@@ -907,6 +907,8 @@ tr:hover td { background: rgba(255,255,255,0.015); }
   <button class="tab" data-sec="ramp">Ramp Plan</button>
   <button class="tab" data-sec="forecast">Forecast</button>
   <button class="tab" data-sec="ordersmix">Orders by Category</button>
+  <button class="tab" data-sec="materialbank">Material Bank Orders</button>
+  <button class="tab" data-sec="fulfillment">Fulfillment Orders</button>
 </nav>
 
 <main>
@@ -1701,6 +1703,58 @@ tr:hover td { background: rgba(255,255,255,0.015); }
 
 </div>
 
+<!-- MATERIAL BANK ORDERS OVERVIEW -->
+<div id="sec-materialbank" class="section">
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
+      <div class="card-title" style="margin-bottom:0;">Material Bank Order Overview</div>
+      <span id="mb-date-label" style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
+    </div>
+    <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
+      <div class="kpi" style="--kpi-color:var(--cyan)"><div class="kpi-lbl">Orders</div><div class="kpi-val" id="mb-kpi-orders">—</div></div>
+      <div class="kpi" style="--kpi-color:var(--blue)"><div class="kpi-lbl">Units</div><div class="kpi-val" id="mb-kpi-units">—</div></div>
+      <div class="kpi" style="--kpi-color:var(--green)"><div class="kpi-lbl">Lines</div><div class="kpi-val" id="mb-kpi-lines">—</div></div>
+      <div class="kpi" style="--kpi-color:var(--purple)"><div class="kpi-lbl">Flow Types</div><div class="kpi-val" id="mb-kpi-types">—</div></div>
+    </div>
+    <div style="max-height:460px;overflow:auto;">
+      <table style="width:100%;font-size:11px;font-family:'IBM Plex Mono',monospace;">
+        <thead style="position:sticky;top:0;background:var(--surf2);z-index:1;">
+          <tr style="border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);">
+            <th style="text-align:left;padding:8px 6px;">Order Number</th><th style="text-align:center;padding:8px 6px;">Flow</th><th style="text-align:center;padding:8px 6px;">Units</th><th style="text-align:center;padding:8px 6px;">Lines</th><th style="text-align:center;padding:8px 6px;">First Pick</th><th style="text-align:left;padding:8px 6px;">Pickers</th>
+          </tr>
+        </thead>
+        <tbody id="mb-detail-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- FULFILLMENT ORDERS OVERVIEW -->
+<div id="sec-fulfillment" class="section">
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
+      <div class="card-title" style="margin-bottom:0;">Fulfillment Order Overview</div>
+      <span id="ful-date-label" style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
+    </div>
+    <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
+      <div class="kpi" style="--kpi-color:var(--cyan)"><div class="kpi-lbl">Orders</div><div class="kpi-val" id="ful-kpi-orders">—</div></div>
+      <div class="kpi" style="--kpi-color:var(--blue)"><div class="kpi-lbl">Units</div><div class="kpi-val" id="ful-kpi-units">—</div></div>
+      <div class="kpi" style="--kpi-color:var(--green)"><div class="kpi-lbl">Lines</div><div class="kpi-val" id="ful-kpi-lines">—</div></div>
+      <div class="kpi" style="--kpi-color:var(--purple)"><div class="kpi-lbl">Flow Types</div><div class="kpi-val" id="ful-kpi-types">—</div></div>
+    </div>
+    <div style="max-height:460px;overflow:auto;">
+      <table style="width:100%;font-size:11px;font-family:'IBM Plex Mono',monospace;">
+        <thead style="position:sticky;top:0;background:var(--surf2);z-index:1;">
+          <tr style="border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);">
+            <th style="text-align:left;padding:8px 6px;">Order Number</th><th style="text-align:center;padding:8px 6px;">Flow</th><th style="text-align:center;padding:8px 6px;">Units</th><th style="text-align:center;padding:8px 6px;">Lines</th><th style="text-align:center;padding:8px 6px;">First Pick</th><th style="text-align:left;padding:8px 6px;">Pickers</th>
+          </tr>
+        </thead>
+        <tbody id="ful-detail-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 </main>
 
 <script>
@@ -2103,7 +2157,7 @@ function handleFile(file) {
       // Support "complete dashboard" exports by locating the actual header row/columns
       // instead of assuming A–E are always Time, X, Y, Units, User ID.
       let headerRowIdx = 0;
-      let colTime = 0, colX = 1, colY = 2, colUnits = 3, colUser = 4, colDate = 5, colDay = 6, colPromo = 7, colOrder = 8, colBrand = 9;
+      let colTime = 0, colX = 1, colY = 2, colUnits = 3, colUser = 4, colDate = 5, colDay = 6, colPromo = 7, colOrder = 8, colBrand = 9, colOrderFlow = 10;
       for(let i = 0; i < Math.min(rows.length, 30); i++) {
         const hdr = (rows[i] || []).map(normalizeHeader);
         const txIdx = findFirstMatch(hdr, ['time of transaction', 'transaction time', 'time transaction', 'time']);
@@ -2128,6 +2182,8 @@ function handleFile(file) {
           if(orderIdx >= 0) colOrder = orderIdx;
           const brandIdx = findFirstMatch(hdr, ['product brand', 'brand', 'productbrand']);
           if(brandIdx >= 0) colBrand = brandIdx;
+          const orderFlowIdx = findFirstMatch(hdr, ['order flow', 'flow', 'flow type', 'order type', 'orderflow']);
+          if(orderFlowIdx >= 0) colOrderFlow = orderFlowIdx;
           break;
         }
       }
@@ -2178,8 +2234,9 @@ function handleFile(file) {
         const promoType = normalizePromoType(r[colPromo]);
         const orderNumber = (r[colOrder] != null && r[colOrder] !== '') ? String(r[colOrder]).trim() : '';
         const productBrand = (r[colBrand] != null && r[colBrand] !== '') ? String(r[colBrand]).trim() : '';
+        const orderFlowType = (r[colOrderFlow] != null && r[colOrderFlow] !== '') ? String(r[colOrderFlow]).trim() : '';
         const dayOfWeek = (r[colDay] != null && r[colDay] !== '') ? String(r[colDay]).trim() : '';
-        newTx.push({x: isNA ? NaN : x, y: isNA ? NaN : y, units, hour, minute, userId, isNA, dateValue, promoType, orderNumber, productBrand, dayOfWeek});
+        newTx.push({x: isNA ? NaN : x, y: isNA ? NaN : y, units, hour, minute, userId, isNA, dateValue, promoType, orderNumber, productBrand, orderFlowType, dayOfWeek});
       }
       setProgress(80);
       
@@ -6207,6 +6264,9 @@ const OM_CAT_COLORS = [
   '#a78bfa','#fb923c','#38bdf8','#4ade80','#facc15','#f472b6',
   '#2dd4bf','#818cf8','#a3e635','#fb7185','#c084fc','#fbbf24'
 ];
+const MB_ORDER_TYPES = new Set(['VLM-1','EXPRESS','EXPRESS1','EXPRESS2','EXPRESS3','CONS01','PACK','EXCEPTIONLOCATION']);
+const FUL_ORDER_TYPES = new Set(['FULDROP1','DSPACK','DSPACK1','DSPACK2','DSPACK3','WGFUL','CARPETFULPACK','DSCONSOL']);
+
 
 // Brand → Product Category lookup (case-insensitive)
 const BRAND_TO_PRODUCT_CATEGORY = (function(){
@@ -6606,6 +6666,97 @@ function drawOrdersHourlyChart(orders, productCategories) {
   });
 }
 
+
+
+function normalizeOrderFlowType(flowValue) {
+  const raw = (flowValue == null ? '' : String(flowValue)).trim();
+  if(!raw) return '';
+  return raw.toUpperCase().replace(/\s+/g, '');
+}
+
+function buildOrderFlowOverview(flowSet, cfg) {
+  if(!txData.length) return;
+
+  const rows = txData.filter(r => r.orderNumber && normalizeOrderFlowType(r.orderFlowType) && flowSet.has(normalizeOrderFlowType(r.orderFlowType)));
+  const orderMap = {};
+  for(const r of rows) {
+    const key = r.orderNumber;
+    const flow = normalizeOrderFlowType(r.orderFlowType);
+    if(!orderMap[key]) {
+      orderMap[key] = { flow, units: 0, lines: 0, hour: r.hour, minute: r.minute, pickers: new Set() };
+    }
+    orderMap[key].units += r.units;
+    orderMap[key].lines += 1;
+    orderMap[key].pickers.add(r.userId);
+    const txMin = r.hour * 60 + (r.minute || 0);
+    const curMin = orderMap[key].hour * 60 + (orderMap[key].minute || 0);
+    if(txMin < curMin) { orderMap[key].hour = r.hour; orderMap[key].minute = r.minute; }
+  }
+
+  const entries = Object.entries(orderMap).sort((a,b) => (a[1].hour*60 + (a[1].minute||0)) - (b[1].hour*60 + (b[1].minute||0)));
+  const totalOrders = entries.length;
+  const totalUnits = entries.reduce((s,[,o]) => s + o.units, 0);
+  const totalLines = entries.reduce((s,[,o]) => s + o.lines, 0);
+  const flowTypes = new Set(entries.map(([,o]) => o.flow));
+
+  document.getElementById(cfg.kpiOrders).textContent = totalOrders.toLocaleString();
+  document.getElementById(cfg.kpiUnits).textContent = totalUnits.toLocaleString();
+  document.getElementById(cfg.kpiLines).textContent = totalLines.toLocaleString();
+  document.getElementById(cfg.kpiTypes).textContent = flowTypes.size.toLocaleString();
+
+  const dateEl = document.getElementById(cfg.dateLabel);
+  if(dateEl) {
+    const dateVal = selectedOpsDate || (txData[0] && txData[0].dateValue) || '';
+    const dayVal = rows[0]?.dayOfWeek || '';
+    dateEl.textContent = dateVal ? `${dateVal}${dayVal ? ' · ' + dayVal : ''}` : '';
+  }
+
+  const body = document.getElementById(cfg.tableBody);
+  body.innerHTML = '';
+  if(!entries.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="6" style="padding:12px 6px;color:var(--text3);text-align:center;">No matching orders found in Column K for this date.</td>`;
+    body.appendChild(tr);
+    return;
+  }
+
+  entries.forEach(([orderNo, o]) => {
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid var(--border)';
+    const timeStr = `${String(o.hour).padStart(2,'0')}:${String(o.minute || 0).padStart(2,'0')}`;
+    tr.innerHTML = `
+      <td style="padding:6px;color:var(--cyan);">${orderNo}</td>
+      <td style="text-align:center;padding:6px;">${o.flow}</td>
+      <td style="text-align:center;padding:6px;font-weight:600;">${o.units.toLocaleString()}</td>
+      <td style="text-align:center;padding:6px;">${o.lines.toLocaleString()}</td>
+      <td style="text-align:center;padding:6px;">${timeStr}</td>
+      <td style="padding:6px;color:var(--text2);font-size:10px;">${[...o.pickers].join(', ')}</td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+function buildMaterialBankOverview() {
+  buildOrderFlowOverview(MB_ORDER_TYPES, {
+    kpiOrders: 'mb-kpi-orders',
+    kpiUnits: 'mb-kpi-units',
+    kpiLines: 'mb-kpi-lines',
+    kpiTypes: 'mb-kpi-types',
+    dateLabel: 'mb-date-label',
+    tableBody: 'mb-detail-body'
+  });
+}
+
+function buildFulfillmentOverview() {
+  buildOrderFlowOverview(FUL_ORDER_TYPES, {
+    kpiOrders: 'ful-kpi-orders',
+    kpiUnits: 'ful-kpi-units',
+    kpiLines: 'ful-kpi-lines',
+    kpiTypes: 'ful-kpi-types',
+    dateLabel: 'ful-date-label',
+    tableBody: 'ful-detail-body'
+  });
+}
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -6625,6 +6776,8 @@ document.querySelectorAll('.tab').forEach(tab => {
       if(id==='shiftbreakdown' && txData.length > 0) { buildShiftBreakdown(); }
       if(id==='forecast' && fcData.length > 0) { fcDrawZoneMap(); fcDrawHeatMap(); fcBuildHourlyChart(); }
       if(id==='ordersmix' && txData.length > 0) { buildOrdersMix(); }
+      if(id==='materialbank' && txData.length > 0) { buildMaterialBankOverview(); }
+      if(id==='fulfillment' && txData.length > 0) { buildFulfillmentOverview(); }
     }, 30);
   });
 });
@@ -6642,6 +6795,8 @@ window.addEventListener('resize', () => {
   if(active==='pickpath') renderPickPath();
   if(active==='forecast' && fcData.length > 0) { fcDrawZoneMap(); fcDrawHeatMap(); fcBuildHourlyChart(); }
   if(active==='ordersmix' && txData.length > 0) { buildOrdersMix(); }
+  if(active==='materialbank' && txData.length > 0) { buildMaterialBankOverview(); }
+  if(active==='fulfillment' && txData.length > 0) { buildFulfillmentOverview(); }
 });
 </script>
 </body>
