@@ -1,6 +1,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -872,7 +873,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="drop-icon">📂</div>
     <div class="drop-text">
       <strong>Drop updated Excel file here</strong>
-      <span>Sheet: "drop the data" · Columns: Time, X, Y, Units, User ID, Date, Day, Category, Order Number, Product Brand, Order Flow (Col K)</span>
+      <span>Sheet: "drop the data" · Columns: Time, X, Y, Units, User ID, Date, Day, Category, Order Number, Product Brand, Drop Off Location (Col K)</span>
     </div>
   </div>
   <div class="drop-hint" style="min-width:240px;">
@@ -889,7 +890,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
   <div class="drop-hint">
     Expected columns (A–K):<br>
     <strong style="color:var(--cyan)">A</strong> Time · <strong style="color:var(--cyan)">B</strong> X · <strong style="color:var(--cyan)">C</strong> Y · <strong style="color:var(--cyan)">D</strong> Units · <strong style="color:var(--cyan)">E</strong> User ID
-    · <strong style="color:var(--cyan)">F</strong> Date · <strong style="color:var(--cyan)">G</strong> Day · <strong style="color:var(--cyan)">H</strong> Category · <strong style="color:var(--cyan)">I</strong> Order No · <strong style="color:var(--cyan)">J</strong> Brand · <strong style="color:var(--cyan)">K</strong> Order Flow
+    · <strong style="color:var(--cyan)">F</strong> Date · <strong style="color:var(--cyan)">G</strong> Day · <strong style="color:var(--cyan)">H</strong> Category · <strong style="color:var(--cyan)">I</strong> Order No · <strong style="color:var(--cyan)">J</strong> Brand · <strong style="color:var(--cyan)">K</strong> Drop Off Location
   </div>
 </div>
 
@@ -903,8 +904,6 @@ tr:hover td { background: rgba(255,255,255,0.015); }
   <button class="tab" data-sec="shiftbreakdown">Shift Breakdown</button>
   <button class="tab" data-sec="pickpath">Pick Path</button>
   <button class="tab" data-sec="uphtargets">Target Pick Path</button>
-  <button class="tab" data-sec="staffing">Staffing Plan</button>
-  <button class="tab" data-sec="ramp">Ramp Plan</button>
   <button class="tab" data-sec="forecast">Forecast</button>
   <button class="tab" data-sec="ordersmix">Orders by Category</button>
   <button class="tab" data-sec="materialbank">Material Bank Orders</button>
@@ -1278,155 +1277,6 @@ tr:hover td { background: rgba(255,255,255,0.015); }
   </div>
 </div>
 
-<!-- STAFFING -->
-<div id="sec-staffing" class="section">
-  <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Staffing Methodology</div>
-    <p style="font-size:12px;color:var(--text2);line-height:1.8;font-family:'IBM Plex Mono',monospace;">
-      Pickers = Daily Zone Units ÷ (UPH Target × 8 hrs) · rounded up to nearest whole picker.<br>
-      Shift 1 (06:00–14:00) carries ~40% of daily volume · Shift 2 (14:00–22:00) carries ~57%.<br>
-      Minimum 1 picker per zone where activity exists. Low-volume zones share a picker on Shift 2.
-    </p>
-    <div class="plan-controls">
-      <div class="shift-tabs">
-        <button type="button" class="shift-tab-btn active" id="staff-tab-s1" onclick="setStaffShift('s1')">1st Shift</button>
-        <button type="button" class="shift-tab-btn" id="staff-tab-s2" onclick="setStaffShift('s2')">2nd Shift</button>
-        <button type="button" class="shift-tab-btn" id="staff-tab-s3" onclick="setStaffShift('s3')">3rd Shift</button>
-      </div>
-     <input id="staff-shift" type="hidden" value="s1">
-      <div class="shift-time-grid">
-        <div class="shift-time-card active" id="staff-config-s1">
-          <div class="shift-time-label">1st Shift</div>
-          <div class="plan-field"><label>Start Time</label><input id="staff-s1-start" type="time" value="06:00" onchange="buildStaffing()"></div>
-          <div class="plan-field"><label>End Time</label><input id="staff-s1-end" type="time" value="14:00" onchange="buildStaffing()"></div>
-          <div class="plan-field"><label>Actual Headcount</label><input id="staff-s1-actual" type="number" min="0" step="1" value="0" oninput="buildStaffing()"></div>
-        </div>
-        <div class="shift-time-card" id="staff-config-s2">
-          <div class="shift-time-label">2nd Shift</div>
-          <div class="plan-field"><label>Start Time</label><input id="staff-s2-start" type="time" value="14:00" onchange="buildStaffing()"></div>
-          <div class="plan-field"><label>End Time</label><input id="staff-s2-end" type="time" value="22:00" onchange="buildStaffing()"></div>
-          <div class="plan-field"><label>Actual Headcount</label><input id="staff-s2-actual" type="number" min="0" step="1" value="0" oninput="buildStaffing()"></div>
-        </div>
-        <div class="shift-time-card" id="staff-config-s3">
-          <div class="shift-time-label">3rd Shift</div>
-          <div class="plan-field"><label>Start Time</label><input id="staff-s3-start" type="time" value="22:00" onchange="buildStaffing()"></div>
-          <div class="plan-field"><label>End Time</label><input id="staff-s3-end" type="time" value="06:00" onchange="buildStaffing()"></div>
-          <div class="plan-field"><label>Actual Headcount</label><input id="staff-s3-actual" type="number" min="0" step="1" value="0" oninput="buildStaffing()"></div>
-        </div>
-      </div>
-     <div class="mini-note">Required Headcount = Σ(zone units ÷ (zone UPH × shift hours)), rounded up per zone. Compare against Actual Headcount for selected shift.</div>
-    </div>
-  </div>
-
-  <div class="summary-row" id="staff-summary"></div>
-
-  <div class="two-col">
-    <div class="shift-box">
-      <div class="shift-hdr">
-         <div><div class="shift-name" id="selected-shift-title">🌅 Shift 1 — First Shift</div><div class="shift-time" id="selected-shift-time">06:00 – 14:00 · 8 hours</div></div>
-        <div class="shift-total" id="s1-hc">—</div>
-      </div>
-      <div class="shift-body" id="s1-body"></div>
-    </div>
-    <div class="shift-box">
-      <div class="shift-hdr">
-         <div><div class="shift-name">🧩 Shift Change Layout (1st + 2nd)</div><div class="shift-time">Overlap staging and shared floor use</div></div>
-        <div class="shift-total" id="s2-hc">—</div>
-      </div>
-      <div class="shift-body" id="s2-body" style="padding:12px;"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Picker Calculation Detail</div>
-    <table id="staff-detail-table"></table>
-  </div>
-  
-  <div class="map-wrap">
-    <div class="card-title">Zone Flow Map — Associate Movement</div>
-    <p style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;margin-bottom:12px;">Shows standing position, start/end points by zone, and movement direction for selected shift.</p>
-    <canvas id="flow-canvas"></canvas>
-  </div>
-</div>
-
-<!-- RAMP -->
-<div id="sec-ramp" class="section">
-  <div class="card">
-    <div class="card-title">4-Week Operational Ramp Plan</div>
-    <p style="font-size:11px;color:var(--text2);font-family:'IBM Plex Mono',monospace;margin-bottom:16px;line-height:1.8;">
-      S1 carries structural headcount premium throughout ramp. Efficiency assumptions: Wk1=70% · Wk2=85% · Steady=100% of UPH target.<br>
-      S1 always larger than S2 · Cross-training completes by end of Week 2 · Full zone coverage from Day 1.
-    </p>
-    <div class="plan-controls">
-      <div class="plan-field">
-        <label>Ramp Shift</label>
-        <select id="ramp-shift" onchange="syncShiftInputs('ramp'); buildRamp()">
-          <option value="s1">1st Shift (06:00–14:00)</option>
-          <option value="s2">2nd Shift (14:00–22:00)</option>
-          <option value="s3">3rd Shift (22:00–06:00)</option>
-        </select>
-      </div>
-      <div class="plan-field">
-        <label>Start Time</label>
-        <input id="ramp-start" type="time" value="06:00" onchange="buildRamp()">
-      </div>
-      <div class="plan-field">
-        <label>End Time</label>
-        <input id="ramp-end" type="time" value="14:00" onchange="buildRamp()">
-      </div>
-      <div class="mini-note" id="ramp-volume-note"></div>
-    </div>
-    <table class="ramp-tbl">
-      <thead>
-        <tr>
-          <th>Zone</th><th>UPH</th><th>Daily Units</th>
-          <th colspan="2" style="text-align:center;background:rgba(6,182,212,0.07);color:var(--cyan)">CALC PICKERS</th>
-          <th colspan="2" style="text-align:center;background:rgba(59,130,246,0.07);color:#93c5fd">WEEK 1</th>
-          <th colspan="2" style="text-align:center;background:rgba(34,197,94,0.07);color:#86efac">WEEK 2</th>
-          <th colspan="2" style="text-align:center;background:rgba(245,158,11,0.07);color:#fcd34d">WK 3–4 STEADY</th>
-        </tr>
-        <tr style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3)">
-          <th></th><th></th><th></th>
-          <th style="text-align:center;background:rgba(6,182,212,0.04);color:var(--cyan)">S1</th>
-          <th style="text-align:center;background:rgba(6,182,212,0.04);color:var(--cyan)">S2</th>
-          <th style="text-align:center;background:rgba(59,130,246,0.04)">S1</th>
-          <th style="text-align:center;background:rgba(59,130,246,0.04)">S2</th>
-          <th style="text-align:center;background:rgba(34,197,94,0.04)">S1</th>
-          <th style="text-align:center;background:rgba(34,197,94,0.04)">S2</th>
-          <th style="text-align:center;background:rgba(245,158,11,0.04)">S1</th>
-          <th style="text-align:center;background:rgba(245,158,11,0.04)">S2</th>
-        </tr>
-      </thead>
-      <tbody id="ramp-body"></tbody>
-      <tfoot>
-        <tr style="border-top:2px solid var(--border);font-weight:700;font-family:'IBM Plex Mono',monospace;">
-          <td colspan="5" style="font-size:11px;letter-spacing:.06em;">TOTAL SCHEDULED</td>
-          <td class="rc" id="r-w1s1" style="background:rgba(59,130,246,0.07);color:#93c5fd"></td>
-          <td class="rc" id="r-w1s2" style="background:rgba(59,130,246,0.07);color:#93c5fd"></td>
-          <td class="rc" id="r-w2s1" style="background:rgba(34,197,94,0.07);color:#86efac"></td>
-          <td class="rc" id="r-w2s2" style="background:rgba(34,197,94,0.07);color:#86efac"></td>
-          <td class="rc" id="r-wss1" style="background:rgba(245,158,11,0.07);color:#fcd34d"></td>
-          <td class="rc" id="r-wss2" style="background:rgba(245,158,11,0.07);color:#fcd34d"></td>
-        </tr>
-      </tfoot>
-    </table>
-  </div>
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
-    <div style="background:rgba(59,130,246,0.07);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:14px;">
-      <div style="font-size:11px;font-weight:700;color:#93c5fd;margin-bottom:8px;letter-spacing:.06em">📅 WEEK 1 — LEARNING</div>
-      <div style="font-size:11px;color:var(--text2);line-height:1.7;font-family:'IBM Plex Mono',monospace;">Extra S1 pickers for shadowing & zone orientation. ~70% efficiency. S2 at minimum viable crew. All zones covered Day 1.</div>
-    </div>
-    <div style="background:rgba(34,197,94,0.07);border:1px solid rgba(34,197,94,0.2);border-radius:8px;padding:14px;">
-      <div style="font-size:11px;font-weight:700;color:#86efac;margin-bottom:8px;letter-spacing:.06em">📅 WEEK 2 — BUILD</div>
-      <div style="font-size:11px;color:var(--text2);line-height:1.7;font-family:'IBM Plex Mono',monospace;">S1 holds +2 buffer pickers. UPH at ~85% of target. S2 absorbs steady-state volume. Cross-training across zones begins.</div>
-    </div>
-    <div style="background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:14px;">
-      <div style="font-size:11px;font-weight:700;color:#fcd34d;margin-bottom:8px;letter-spacing:.06em">📅 WK 3–4 — STEADY</div>
-      <div style="font-size:11px;color:var(--text2);line-height:1.7;font-family:'IBM Plex Mono',monospace;">Full UPH targets met. S1 premium maintained for zone coverage. Continuous monitoring. KPI review weekly.</div>
-    </div>
-  </div>
-</div>
-
 <!-- FORECAST DASHBOARD -->
 <div id="sec-forecast" class="section">
 
@@ -1707,20 +1557,21 @@ tr:hover td { background: rgba(255,255,255,0.015); }
 <div id="sec-materialbank" class="section">
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
-      <div class="card-title" style="margin-bottom:0;">Material Bank Order Overview</div>
+      <div class="card-title" style="margin-bottom:0;">Material Bank Order View Details</div>
       <span id="mb-date-label" style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
     </div>
-    <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
+    <div class="kpi-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:12px;">
       <div class="kpi" style="--kpi-color:var(--cyan)"><div class="kpi-lbl">Orders</div><div class="kpi-val" id="mb-kpi-orders">—</div></div>
       <div class="kpi" style="--kpi-color:var(--blue)"><div class="kpi-lbl">Units</div><div class="kpi-val" id="mb-kpi-units">—</div></div>
       <div class="kpi" style="--kpi-color:var(--green)"><div class="kpi-lbl">Lines</div><div class="kpi-val" id="mb-kpi-lines">—</div></div>
-      <div class="kpi" style="--kpi-color:var(--purple)"><div class="kpi-lbl">Flow Types</div><div class="kpi-val" id="mb-kpi-types">—</div></div>
+      <div class="kpi" style="--kpi-color:var(--purple)"><div class="kpi-lbl">Drop Off Types</div><div class="kpi-val" id="mb-kpi-types">—</div></div>
+      <div class="kpi" style="--kpi-color:#14b8a6"><div class="kpi-lbl">Orders Without Tile / Carpet / Wolf Gordon</div><div class="kpi-val" id="mb-kpi-non-tcw">—</div></div>
     </div>
     <div style="max-height:460px;overflow:auto;">
       <table style="width:100%;font-size:11px;font-family:'IBM Plex Mono',monospace;">
         <thead style="position:sticky;top:0;background:var(--surf2);z-index:1;">
           <tr style="border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);">
-            <th style="text-align:left;padding:8px 6px;">Order Number</th><th style="text-align:center;padding:8px 6px;">Flow</th><th style="text-align:center;padding:8px 6px;">Units</th><th style="text-align:center;padding:8px 6px;">Lines</th><th style="text-align:center;padding:8px 6px;">First Pick</th><th style="text-align:left;padding:8px 6px;">Pickers</th>
+            <th style="text-align:left;padding:8px 6px;">Order Number</th><th style="text-align:center;padding:8px 6px;">Drop Off Location</th><th style="text-align:center;padding:8px 6px;">Units</th><th style="text-align:center;padding:8px 6px;">Lines</th><th style="text-align:center;padding:8px 6px;">First Pick</th><th style="text-align:left;padding:8px 6px;">Pickers</th>
           </tr>
         </thead>
         <tbody id="mb-detail-body"></tbody>
@@ -1733,7 +1584,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
 <div id="sec-fulfillment" class="section">
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
-      <div class="card-title" style="margin-bottom:0;">Fulfillment Order Overview</div>
+      <div class="card-title" style="margin-bottom:0;">Fulfillment Order View Details</div>
       <span id="ful-date-label" style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
     </div>
     <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
@@ -1746,7 +1597,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
       <table style="width:100%;font-size:11px;font-family:'IBM Plex Mono',monospace;">
         <thead style="position:sticky;top:0;background:var(--surf2);z-index:1;">
           <tr style="border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);">
-            <th style="text-align:left;padding:8px 6px;">Order Number</th><th style="text-align:center;padding:8px 6px;">Flow</th><th style="text-align:center;padding:8px 6px;">Units</th><th style="text-align:center;padding:8px 6px;">Lines</th><th style="text-align:center;padding:8px 6px;">First Pick</th><th style="text-align:left;padding:8px 6px;">Pickers</th>
+            <th style="text-align:left;padding:8px 6px;">Order Number</th><th style="text-align:center;padding:8px 6px;">Drop Off Location</th><th style="text-align:center;padding:8px 6px;">Units</th><th style="text-align:center;padding:8px 6px;">Lines</th><th style="text-align:center;padding:8px 6px;">First Pick</th><th style="text-align:left;padding:8px 6px;">Pickers</th>
           </tr>
         </thead>
         <tbody id="ful-detail-body"></tbody>
@@ -1840,7 +1691,61 @@ function parseOpsDateValue(cell) {
   if(Object.prototype.toString.call(cell) === '[object Date]' && !isNaN(cell.getTime())) {
     return `${cell.getFullYear()}-${String(cell.getMonth()+1).padStart(2,'0')}-${String(cell.getDate()).padStart(2,'0')}`;
   }
-  return String(cell).trim();
+  const raw = String(cell).trim();
+  if(!raw) return '';
+  const parsed = new Date(raw);
+  if(!Number.isNaN(parsed.getTime())) {
+    return `${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`;
+  }
+  const mdy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if(mdy) {
+    const mm = Number(mdy[1]), dd = Number(mdy[2]), yy = Number(mdy[3].length === 2 ? `20${mdy[3]}` : mdy[3]);
+    if(mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return `${String(yy).padStart(4,'0')}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+    }
+  }
+  return raw;
+}
+
+function parseOpsTimeValue(cell) {
+  if(cell == null || cell === '') return { hour: 0, minute: 0 };
+  if(typeof cell === 'number' && Number.isFinite(cell)) {
+    const frac = ((cell % 1) + 1) % 1;
+    const totalMinutes = Math.round(frac * 24 * 60);
+    return {
+      hour: Math.floor(totalMinutes / 60) % 24,
+      minute: totalMinutes % 60
+    };
+  }
+  if(Object.prototype.toString.call(cell) === '[object Date]' && !isNaN(cell.getTime())) {
+    return { hour: cell.getHours(), minute: cell.getMinutes() };
+  }
+  const raw = String(cell).trim();
+  let m = raw.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+  if(m) {
+    let hour = parseInt(m[1], 10);
+    const minute = parseInt(m[2], 10) || 0;
+    const ampm = (m[4] || '').toUpperCase();
+    if(ampm === 'PM' && hour < 12) hour += 12;
+    if(ampm === 'AM' && hour === 12) hour = 0;
+    return { hour: hour % 24, minute };
+  }
+  m = raw.match(/^\d+$/);
+  if(m) {
+    const hour = parseInt(raw, 10);
+    if(Number.isFinite(hour)) return { hour: ((hour % 24) + 24) % 24, minute: 0 };
+  }
+  return { hour: 0, minute: 0 };
+}
+
+function normalizeDropOffLocation(value) {
+  return String(value == null ? '' : value).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '');
+}
+
+function isTileCarpetWolfGordonBrand(value) {
+  const brand = String(value == null ? '' : value).trim().toLowerCase();
+  if(!brand) return false;
+  return /wolf\s*gordon|wolfgordon|tile|carpet/.test(brand);
 }
 
 function normalizePromoType(value) {
@@ -2136,112 +2041,122 @@ function handleFile(file) {
     setProgress(30);
     setTimeout(() => {
       try {
-      const wb = XLSX.read(e.target.result, {type:'array'});
-      const sheetName = wb.SheetNames.find(s => s.toLowerCase().includes('drop')) || wb.SheetNames[0];
-      const ws = wb.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true});
-      setProgress(60);
-      
-      const newTx = [];
-      const cellToText = v => {
-        if(v == null) return '';
-        if(typeof v === 'object' && v.w) return String(v.w);
-        if(typeof v === 'object' && v.v != null) return String(v.v);
-        return String(v);
-      };
-      const isStrictNumeric = (txt) => /^[-+]?\d*\.?\d+(e[-+]?\d+)?$/i.test((txt || '').trim());
+        const wb = XLSX.read(e.target.result, { type:'array', cellDates:true });
+        const sheetName = wb.SheetNames.find(s => s.toLowerCase().includes('drop')) || wb.SheetNames[0];
+        const ws = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:'' });
+        setProgress(60);
 
-       const normalizeHeader = (value) => cellToText(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
-      const findFirstMatch = (headers, patterns) => headers.findIndex(h => patterns.some(p => h === p || h.startsWith(p + ' ') || h.endsWith(' ' + p) || h.includes(' ' + p + ' ')));
+        const newTx = [];
+        const cellToText = v => {
+          if(v == null) return '';
+          if(typeof v === 'object' && v.w) return String(v.w);
+          if(typeof v === 'object' && v.v != null) return String(v.v);
+          return String(v);
+        };
+        const isStrictNumeric = (txt) => /^[-+]?\d*\.?\d+(e[-+]?\d+)?$/i.test((txt || '').trim());
+        const normalizeHeader = (value) => cellToText(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+        const findFirstMatch = (headers, patterns) => headers.findIndex(h => patterns.some(p => h === p || h.startsWith(p + ' ') || h.endsWith(' ' + p) || h.includes(' ' + p + ' ')));
 
-      // Support "complete dashboard" exports by locating the actual header row/columns
-      // instead of assuming A–E are always Time, X, Y, Units, User ID.
-      let headerRowIdx = 0;
-      let colTime = 0, colX = 1, colY = 2, colUnits = 3, colUser = 4, colDate = 5, colDay = 6, colPromo = 7, colOrder = 8, colBrand = 9, colOrderFlow = 10;
-      for(let i = 0; i < Math.min(rows.length, 30); i++) {
-        const hdr = (rows[i] || []).map(normalizeHeader);
-        const txIdx = findFirstMatch(hdr, ['time of transaction', 'transaction time', 'time transaction', 'time']);
-        const xIdx = findFirstMatch(hdr, ['x coordinate', 'x coord', 'x']);
-        const yIdx = findFirstMatch(hdr, ['y coordinate', 'y coord', 'y']);
-        const unitsIdx = findFirstMatch(hdr, ['units', 'qty', 'quantity']);
-        if(txIdx >= 0 && xIdx >= 0 && yIdx >= 0 && unitsIdx >= 0) {
-          headerRowIdx = i;
-          colTime = txIdx;
-          colX = xIdx;
-          colY = yIdx;
-          colUnits = unitsIdx;
-          const userIdx = findFirstMatch(hdr, ['user id', 'userid', 'user']);
-          if(userIdx >= 0) colUser = userIdx;
-          const dateIdx = findFirstMatch(hdr, ['date']);
-          if(dateIdx >= 0) colDate = dateIdx;
-          const promoIdx = findFirstMatch(hdr, ['promo type', 'promo', 'category', 'type']);
-          if(promoIdx >= 0) colPromo = promoIdx;
-          const dayIdx = findFirstMatch(hdr, ['day', 'day of week', 'dayofweek']);
-          if(dayIdx >= 0) colDay = dayIdx;
-          const orderIdx = findFirstMatch(hdr, ['order number', 'order no', 'order', 'ordernumber']);
-          if(orderIdx >= 0) colOrder = orderIdx;
-          const brandIdx = findFirstMatch(hdr, ['product brand', 'brand', 'productbrand']);
-          if(brandIdx >= 0) colBrand = brandIdx;
-          const orderFlowIdx = findFirstMatch(hdr, ['order flow', 'flow', 'flow type', 'order type', 'orderflow']);
-          if(orderFlowIdx >= 0) colOrderFlow = orderFlowIdx;
-          break;
+        let headerRowIdx = 0;
+        let colTime = 0, colX = 1, colY = 2, colUnits = 3, colUser = 4, colDate = 5, colDay = 6, colPromo = 7, colOrder = 8, colBrand = 9, colDropOff = 10;
+
+        for(let i = 0; i < Math.min(rows.length, 40); i++) {
+          const hdr = (rows[i] || []).map(normalizeHeader);
+          const txIdx = findFirstMatch(hdr, ['time of transaction', 'transaction time', 'time transaction', 'time']);
+          const xIdx = findFirstMatch(hdr, ['x coordinate', 'x coord', 'x']);
+          const yIdx = findFirstMatch(hdr, ['y coordinate', 'y coord', 'y']);
+          const unitsIdx = findFirstMatch(hdr, ['units', 'qty', 'quantity']);
+          if(txIdx >= 0 && xIdx >= 0 && yIdx >= 0 && unitsIdx >= 0) {
+            headerRowIdx = i;
+            colTime = txIdx;
+            colX = xIdx;
+            colY = yIdx;
+            colUnits = unitsIdx;
+            const userIdx = findFirstMatch(hdr, ['user id', 'userid', 'user']);
+            if(userIdx >= 0) colUser = userIdx;
+            const dateIdx = findFirstMatch(hdr, ['date']);
+            if(dateIdx >= 0) colDate = dateIdx;
+            const promoIdx = findFirstMatch(hdr, ['promo type', 'promo', 'category', 'type']);
+            if(promoIdx >= 0) colPromo = promoIdx;
+            const dayIdx = findFirstMatch(hdr, ['day', 'day of week', 'dayofweek']);
+            if(dayIdx >= 0) colDay = dayIdx;
+            const orderIdx = findFirstMatch(hdr, ['order number', 'order no', 'order', 'ordernumber']);
+            if(orderIdx >= 0) colOrder = orderIdx;
+            const brandIdx = findFirstMatch(hdr, ['product brand', 'brand', 'productbrand']);
+            if(brandIdx >= 0) colBrand = brandIdx;
+            const dropOffIdx = findFirstMatch(hdr, ['drop off location', 'dropoff location', 'drop location', 'drop off', 'dropoff', 'order flow', 'flow', 'flow type', 'order type', 'orderflow']);
+            if(dropOffIdx >= 0) colDropOff = dropOffIdx;
+            break;
+          }
         }
-      }
 
-      for(let i = headerRowIdx + 1; i < rows.length; i++) {
-        const r = rows[i] || [];
-        const xRaw = r[colX];
-        const yRaw = r[colY];
-        const tRaw = r[colTime];
-        const unitsRaw = r[colUnits];
-        if([xRaw, yRaw, tRaw, unitsRaw].every(v => cellToText(v).trim() === '')) continue;
-        const xTxtRaw = cellToText(xRaw).trim();
-        const yTxtRaw = cellToText(yRaw).trim();
-        const xTxt = xTxtRaw.toLowerCase();
-        const yTxt = yTxtRaw.toLowerCase();
+        for(let i = headerRowIdx + 1; i < rows.length; i++) {
+          const r = rows[i] || [];
+          const xRaw = r[colX];
+          const yRaw = r[colY];
+          const tRaw = r[colTime];
+          const unitsRaw = r[colUnits];
+          const dateRaw = r[colDate];
+          if([xRaw, yRaw, tRaw, unitsRaw, dateRaw].every(v => cellToText(v).trim() === '')) continue;
 
-        // Units: use value from col D; default to 1 only if column is absent
-         const rawUnits = r[colUnits];
-        const units = (rawUnits != null && rawUnits !== '') ? (parseFloat(rawUnits) || 0) : 1;
- 
-        const xLooksNumeric = isStrictNumeric(xTxtRaw);
-        const yLooksNumeric = isStrictNumeric(yTxtRaw);
-        const hasExplicitNA = xTxt.includes('#n/a') || yTxt.includes('#n/a');
-        const hasInvalidCoords = !xLooksNumeric || !yLooksNumeric;
+          const xTxtRaw = cellToText(xRaw).trim();
+          const yTxtRaw = cellToText(yRaw).trim();
+          const xTxt = xTxtRaw.toLowerCase();
+          const yTxt = yTxtRaw.toLowerCase();
 
-        // Classify records as No Location whenever coordinates are invalid/missing.
-        // This prevents rows from being dropped when coordinate cells are blank, text, or #N/A.
-        const isNA = hasExplicitNA || hasInvalidCoords;
+          const units = (unitsRaw != null && unitsRaw !== '') ? (parseFloat(unitsRaw) || 0) : 0;
+          if(units <= 0) continue;
 
-        const x = xLooksNumeric ? parseFloat(xTxtRaw) : NaN;
-        const y = yLooksNumeric ? parseFloat(yTxtRaw) : NaN;
-        if(!isNA && (isNaN(x) || isNaN(y))) continue;
+          const xLooksNumeric = isStrictNumeric(xTxtRaw);
+          const yLooksNumeric = isStrictNumeric(yTxtRaw);
+          const hasExplicitNA = xTxt.includes('#n/a') || yTxt.includes('#n/a');
+          const hasInvalidCoords = !xLooksNumeric || !yLooksNumeric;
+          const isNA = hasExplicitNA || hasInvalidCoords;
 
-        // Parse hour AND minute from col A
-        let hour = 0, minute = 0;
-       const t = r[colTime];
-        if(typeof t === 'number') {
-          const frac = ((t % 1) + 1) % 1;
-          hour = Math.floor(frac * 24);
-          minute = Math.floor((frac * 24 - hour) * 60);
-        } else if(typeof t === 'string') {
-          const m = t.match(/(\d+):(\d+)/);
-          if(m) { hour = parseInt(m[1]); minute = parseInt(m[2]); }
+          const x = xLooksNumeric ? parseFloat(xTxtRaw) : NaN;
+          const y = yLooksNumeric ? parseFloat(yTxtRaw) : NaN;
+          if(!isNA && (Number.isNaN(x) || Number.isNaN(y))) continue;
+
+          const { hour, minute } = parseOpsTimeValue(tRaw);
+          const userId = (r[colUser] != null && r[colUser] !== '') ? String(r[colUser]).trim() : 'Unknown';
+          const dateValue = parseOpsDateValue(dateRaw);
+          if(!dateValue) continue;
+
+          const promoType = normalizePromoType(r[colPromo]);
+          const orderNumber = (r[colOrder] != null && r[colOrder] !== '') ? String(r[colOrder]).trim() : '';
+          const productBrand = (r[colBrand] != null && r[colBrand] !== '') ? String(r[colBrand]).trim() : '';
+          const dropOffLocation = (r[colDropOff] != null && r[colDropOff] !== '') ? String(r[colDropOff]).trim() : '';
+          const dayOfWeek = (r[colDay] != null && r[colDay] !== '') ? String(r[colDay]).trim() : '';
+
+          newTx.push({
+            x: isNA ? NaN : x,
+            y: isNA ? NaN : y,
+            units,
+            hour,
+            minute,
+            userId,
+            isNA,
+            dateValue,
+            promoType,
+            orderNumber,
+            productBrand,
+            dropOffLocation,
+            orderFlowType: dropOffLocation,
+            dayOfWeek
+          });
         }
-        // User ID from col E
-        const userId = (r[colUser] != null && r[colUser] !== '') ? String(r[colUser]).trim() : 'Unknown';
-        const dateValue = parseOpsDateValue(r[colDate]);
-        const promoType = normalizePromoType(r[colPromo]);
-        const orderNumber = (r[colOrder] != null && r[colOrder] !== '') ? String(r[colOrder]).trim() : '';
-        const productBrand = (r[colBrand] != null && r[colBrand] !== '') ? String(r[colBrand]).trim() : '';
-        const orderFlowType = (r[colOrderFlow] != null && r[colOrderFlow] !== '') ? String(r[colOrderFlow]).trim() : '';
-        const dayOfWeek = (r[colDay] != null && r[colDay] !== '') ? String(r[colDay]).trim() : '';
-        newTx.push({x: isNA ? NaN : x, y: isNA ? NaN : y, units, hour, minute, userId, isNA, dateValue, promoType, orderNumber, productBrand, orderFlowType, dayOfWeek});
-      }
-      setProgress(80);
-      
-      // Assign zones in chunks
-      assignZonesAndBuild(newTx, file.name);
+        setProgress(80);
+
+        if(!newTx.length) {
+          isOpsDataProcessing = false;
+          pendingShiftBreakdownCalc = false;
+          setProgress(100);
+          showRefreshToast('⚠️ No valid transaction rows were found in the uploaded file. Please verify the Date, Time, Units, X, and Y columns.');
+          return;
+        }
+
+        assignZonesAndBuild(newTx, file.name);
       } catch(err) {
         isOpsDataProcessing = false;
         pendingShiftBreakdownCalc = false;
@@ -6266,6 +6181,8 @@ const OM_CAT_COLORS = [
 ];
 const MB_ORDER_TYPES = new Set(['VLM-1','EXPRESS','EXPRESS1','EXPRESS2','EXPRESS3','CONS01','PACK','EXCEPTIONLOCATION']);
 const FUL_ORDER_TYPES = new Set(['FULDROP1','DSPACK','DSPACK1','DSPACK2','DSPACK3','WGFUL','CARPETFULPACK','DSCONSOL']);
+const DROP_OFF_MB_TYPES = MB_ORDER_TYPES;
+const DROP_OFF_FUL_TYPES = FUL_ORDER_TYPES;
 
 
 // Brand → Product Category lookup (case-insensitive)
@@ -6677,19 +6594,20 @@ function normalizeOrderFlowType(flowValue) {
 function buildOrderFlowOverview(flowSet, cfg) {
   if(!txData.length) return;
 
-  const rows = txData.filter(r => r.orderNumber && normalizeOrderFlowType(r.orderFlowType) && flowSet.has(normalizeOrderFlowType(r.orderFlowType)));
+  const rows = txData.filter(r => r.orderNumber && normalizeDropOffLocation(r.dropOffLocation || r.orderFlowType) && flowSet.has(normalizeDropOffLocation(r.dropOffLocation || r.orderFlowType)));
   const orderMap = {};
   for(const r of rows) {
     const key = r.orderNumber;
-    const flow = normalizeOrderFlowType(r.orderFlowType);
+    const flow = normalizeDropOffLocation(r.dropOffLocation || r.orderFlowType);
     if(!orderMap[key]) {
-      orderMap[key] = { flow, units: 0, lines: 0, hour: r.hour, minute: r.minute, pickers: new Set() };
+      orderMap[key] = { flow, units: 0, lines: 0, hour: r.hour, minute: r.minute, pickers: new Set(), brands: new Set() };
     }
     orderMap[key].units += r.units;
     orderMap[key].lines += 1;
     orderMap[key].pickers.add(r.userId);
-    const txMin = r.hour * 60 + (r.minute || 0);
-    const curMin = orderMap[key].hour * 60 + (orderMap[key].minute || 0);
+    if(r.productBrand) orderMap[key].brands.add(r.productBrand);
+    const txMin = (r.hour || 0) * 60 + (r.minute || 0);
+    const curMin = (orderMap[key].hour || 0) * 60 + (orderMap[key].minute || 0);
     if(txMin < curMin) { orderMap[key].hour = r.hour; orderMap[key].minute = r.minute; }
   }
 
@@ -6698,11 +6616,16 @@ function buildOrderFlowOverview(flowSet, cfg) {
   const totalUnits = entries.reduce((s,[,o]) => s + o.units, 0);
   const totalLines = entries.reduce((s,[,o]) => s + o.lines, 0);
   const flowTypes = new Set(entries.map(([,o]) => o.flow));
+  const nonTCWOrders = entries.filter(([,o]) => ![...o.brands].some(isTileCarpetWolfGordonBrand)).length;
 
   document.getElementById(cfg.kpiOrders).textContent = totalOrders.toLocaleString();
   document.getElementById(cfg.kpiUnits).textContent = totalUnits.toLocaleString();
   document.getElementById(cfg.kpiLines).textContent = totalLines.toLocaleString();
   document.getElementById(cfg.kpiTypes).textContent = flowTypes.size.toLocaleString();
+  if(cfg.kpiNonTCW) {
+    const el = document.getElementById(cfg.kpiNonTCW);
+    if(el) el.textContent = nonTCWOrders.toLocaleString();
+  }
 
   const dateEl = document.getElementById(cfg.dateLabel);
   if(dateEl) {
@@ -6715,7 +6638,7 @@ function buildOrderFlowOverview(flowSet, cfg) {
   body.innerHTML = '';
   if(!entries.length) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="6" style="padding:12px 6px;color:var(--text3);text-align:center;">No matching orders found in Column K for this date.</td>`;
+    tr.innerHTML = `<td colspan="6" style="padding:12px 6px;color:var(--text3);text-align:center;">No matching orders found in Drop Off Location for this date.</td>`;
     body.appendChild(tr);
     return;
   }
@@ -6737,18 +6660,19 @@ function buildOrderFlowOverview(flowSet, cfg) {
 }
 
 function buildMaterialBankOverview() {
-  buildOrderFlowOverview(MB_ORDER_TYPES, {
+  buildOrderFlowOverview(DROP_OFF_MB_TYPES, {
     kpiOrders: 'mb-kpi-orders',
     kpiUnits: 'mb-kpi-units',
     kpiLines: 'mb-kpi-lines',
     kpiTypes: 'mb-kpi-types',
+    kpiNonTCW: 'mb-kpi-non-tcw',
     dateLabel: 'mb-date-label',
     tableBody: 'mb-detail-body'
   });
 }
 
 function buildFulfillmentOverview() {
-  buildOrderFlowOverview(FUL_ORDER_TYPES, {
+  buildOrderFlowOverview(DROP_OFF_FUL_TYPES, {
     kpiOrders: 'ful-kpi-orders',
     kpiUnits: 'ful-kpi-units',
     kpiLines: 'ful-kpi-lines',
