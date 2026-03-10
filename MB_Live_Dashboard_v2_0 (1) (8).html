@@ -8,60 +8,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MaterialBank · Olive Branch — Live Operations Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script>
-
-/* MB Live Dashboard — Upload Parser Patch (v1.1)
- * Change: Normalize Drop Off Location to uppercase (with single spaces) so matching is case-insensitive.
- */
-(function(){
-  const EXPECTED_ALIASES = {
-    time: [/^time( of transaction)?$/i, /^timestamp$/i, /^first\s*pick$/i, /^pick\s*time$/i, /^time$/i],
-    x: [/^x( coord(inate)?)?$/i],
-    y: [/^y( coord(inate)?)?$/i],
-    units: [/^(units?|qty|quantity)$/i],
-    user: [/^(user( id)?|picker|employee( id)?|associate( id)?)$/i],
-    date: [/^date$/i, /^tx\s*date$/i],
-    day: [/^day$/i, /^(dow|weekday)$/i],
-    category: [/^(category|product\s*category)$/i],
-    order: [/^order(\s*(number|no|#))?$/i, /^po$/i],
-    brand: [/^(brand|product\s*brand)$/i],
-    dropoff: [/^drop\s*-?\s*off(\s*(location)?)?$/i, /^(drop)?\s*off$/i, /^location$/i]
-  };
-  const REQUIRED_KEYS = ['time','x','y','units'];
-  const ALL_KEYS = ['time','x','y','units','user','date','day','category','order','brand','dropoff'];
-
-  const q = sel => document.querySelector(sel);
-  function normHeader(h){ if (h==null) return ''; return String(h).replace(/\s+/g,' ').replace(/\n/g,' ').trim(); }
-  function matchHeader(header, key){ const h = normHeader(header); return EXPECTED_ALIASES[key].some(rx => rx.test(h)); }
-  function findHeaderRow(rows){ let best={idx:-1,score:-1,map:null}; for(let r=0;r<Math.min(50,rows.length);r++){ const row=rows[r]||[]; const map={}; let score=0; ALL_KEYS.forEach(k=>{ const idx=row.findIndex(cell=>matchHeader(cell,k)); if(idx!==-1){ map[k]=idx; score+=1; }}); const reqScore=REQUIRED_KEYS.filter(k=>k in map).length; const final=score+(reqScore===REQUIRED_KEYS.length?10:0); if(final>best.score) best={idx:r,score:final,map}; } return best; }
-  function pickBestSheet(wb){ let best={sheet:null,score:-1,details:null}; const preferred=/^(drop( the)? data|data|transactions?)$/i; for(const name of wb.SheetNames){ const ws=wb.Sheets[name]; const A=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''}); const hdr=findHeaderRow(A); let s=hdr.score; if(preferred.test(name)) s+=2; if(s>best.score) best={sheet:name,score:s,details:{rows:A,header:hdr}}; } return best; }
-  function excelDateToJS(d){ if(typeof d==='number'&&d>59&&d<60000){ const epoch=new Date(Date.UTC(1899,11,30)); return new Date(epoch.getTime()+d*86400000); } const s=String(d).trim(); const ts=Date.parse(s); return isNaN(ts)?null:new Date(ts); }
-  function toNumber(v){ if(v==null||v==='') return null; const n=+String(v).toString().replace(/[^0-9.+-]/g,''); return isFinite(n)?n:null; }
-  function normalizeDropoff(v){ if(v==null||v==='') return null; return String(v).replace(/\s+/g,' ').trim().toUpperCase(); }
-  function buildRows(rows,headerIdx,map){ const out=[]; for(let r=headerIdx+1;r<rows.length;r++){ const row=rows[r]||[]; const obj={}; ALL_KEYS.forEach(k=>{ const idx=map[k]; obj[k]= (idx==null?null:row[idx]); });
-      // numeric & date cleanup
-      obj.x=toNumber(obj.x); obj.y=toNumber(obj.y); obj.units=toNumber(obj.units)||0;
-      if(obj.date!=null){ const dt=excelDateToJS(obj.date); if(dt) obj.date=dt; }
-      if(obj.time!=null){ obj.time=String(obj.time).trim(); }
-      // case-insensitive matching for Drop Off Location
-      if('dropoff' in obj){ obj.dropoff_raw = obj.dropoff; obj.dropoff = normalizeDropoff(obj.dropoff); }
-      out.push(obj); }
-    // keep rows that have any required
-    return out.filter(r=>REQUIRED_KEYS.some(k=>r[k]!=null&&r[k]!=='')); }
-
-  function showSuccessUI(fileName,sheetName,detected){ const fileLbl=q('#drop-file-label'); const sheetLbl=q('#drop-sheet-label'); if(fileLbl) fileLbl.textContent=`Loaded: ${fileName}`; if(sheetLbl){ const cols=ALL_KEYS.map(k=> (k in detected? k : `\u2717 ${k}`)); sheetLbl.textContent=`Sheet: ${sheetName} · Detected columns: ${cols.join(', ')}`; } }
-  function showErrorUI(msg,found){ const sheetLbl=q('#drop-sheet-label'); if(sheetLbl){ if(found&&found.headers){ const hdr=found.headers.map(h=>`'${h}'`).join(', '); sheetLbl.textContent=`Upload parse failed. ${msg}. Found headers: ${hdr}`; } else { sheetLbl.textContent=`Upload parse failed. ${msg}`; } } alert(sheetLbl?sheetLbl.textContent:msg); }
-  async function handleFile(file){ if(!file) return; try{ const ab=await file.arrayBuffer(); const wb=XLSX.read(ab,{type:'array',dense:true}); const best=pickBestSheet(wb); if(!best.sheet||!best.details||!best.details.header||best.details.header.score<0){ throw new Error('Could not detect a header row with the required columns'); } const rows=best.details.rows; const headerIdx=best.details.header.idx; const map=best.details.header.map; const headersRaw=rows[headerIdx]?rows[headerIdx].map(normHeader):[]; const reqMissing=['time','x','y','units'].filter(k=>!(k in map)); if(reqMissing.length){ showErrorUI(`Missing required columns: ${reqMissing.join(', ')}`,{headers:headersRaw}); return; } const data=buildRows(rows,headerIdx,map); if(!data.length) throw new Error('No data rows detected under the header row');
-      // Expose normalized helper too (in case renderers want it)
-      window.__MB__=window.__MB__||{}; window.__MB__.uploadedTxAll=data; window.__MB__.normalizeDropoff = normalizeDropoff;
-      window.dispatchEvent(new CustomEvent('upload:parsed',{detail:{rows:data, sheet:best.sheet, headerRow:headerIdx, columnMap:map}}));
-      showSuccessUI(file.name,best.sheet,map);
-    } catch(err){ console.error(err); showErrorUI(err.message); } }
-  window.handleFile = handleFile;
-})();
-
-  </script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=Syne:wght@400;500;600;700;800&display=swap');
 
@@ -922,11 +868,11 @@ tr:hover td { background: rgba(255,255,255,0.015); }
 <!-- DROP ZONE -->
 <div class="drop-banner">
   <div class="drop-zone" id="drop-zone">
-    <input type="file" id="file-input" accept=".xlsx,.xls,.csv" onchange="handleFile(this.files[0])">
+    <input type="file" id="file-input" accept=".xlsx,.xls" onchange="handleFile(this.files[0])">
     <div class="drop-icon">📂</div>
     <div class="drop-text">
-      <strong>Drop updated ops file here (used across all dashboard tabs)</strong>
-      <span>Sheet: "drop the data" · Columns: Time of transaction, X, Y, Units, User ID, Date, Day, Category, Order Number, Product Brand, Drop Off Location</span>
+      <strong>Drop updated Excel file here</strong>
+      <span>Sheet: "drop the data" · Columns: Time, X, Y, Units, User ID, Date, Day, Category, Order Number, Product Brand</span>
     </div>
   </div>
   <div class="drop-hint" style="min-width:240px;">
@@ -941,9 +887,9 @@ tr:hover td { background: rgba(255,255,255,0.015); }
     <div id="ops-day-value" style="width:100%;margin-top:2px;background:var(--surf1);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;font-size:11px;font-family:'IBM Plex Mono',monospace;min-height:28px;display:flex;align-items:center;">—</div>
   </div>
   <div class="drop-hint">
-    Expected columns (A–K):<br>
+    Expected columns (A–J):<br>
     <strong style="color:var(--cyan)">A</strong> Time · <strong style="color:var(--cyan)">B</strong> X · <strong style="color:var(--cyan)">C</strong> Y · <strong style="color:var(--cyan)">D</strong> Units · <strong style="color:var(--cyan)">E</strong> User ID
-    · <strong style="color:var(--cyan)">F</strong> Date · <strong style="color:var(--cyan)">G</strong> Day · <strong style="color:var(--cyan)">H</strong> Category · <strong style="color:var(--cyan)">I</strong> Order No · <strong style="color:var(--cyan)">J</strong> Brand · <strong style="color:var(--cyan)">K</strong> Drop Off Location
+    · <strong style="color:var(--cyan)">F</strong> Date · <strong style="color:var(--cyan)">G</strong> Day · <strong style="color:var(--cyan)">H</strong> Category · <strong style="color:var(--cyan)">I</strong> Order No · <strong style="color:var(--cyan)">J</strong> Brand
   </div>
 </div>
 
@@ -957,9 +903,10 @@ tr:hover td { background: rgba(255,255,255,0.015); }
   <button class="tab" data-sec="shiftbreakdown">Shift Breakdown</button>
   <button class="tab" data-sec="pickpath">Pick Path</button>
   <button class="tab" data-sec="uphtargets">Target Pick Path</button>
+  <button class="tab" data-sec="staffing">Staffing Plan</button>
+  <button class="tab" data-sec="ramp">Ramp Plan</button>
   <button class="tab" data-sec="forecast">Forecast</button>
-  <button class="tab" data-sec="ordersmix-mb">MB Order View</button>
-  <button class="tab" data-sec="ordersmix-ful">Fulfillment Order View</button>
+  <button class="tab" data-sec="ordersmix">Orders by Category</button>
 </nav>
 
 <main>
@@ -1329,31 +1276,189 @@ tr:hover td { background: rgba(255,255,255,0.015); }
   </div>
 </div>
 
+<!-- STAFFING -->
+<div id="sec-staffing" class="section">
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Staffing Methodology</div>
+    <p style="font-size:12px;color:var(--text2);line-height:1.8;font-family:'IBM Plex Mono',monospace;">
+      Pickers = Daily Zone Units ÷ (UPH Target × 8 hrs) · rounded up to nearest whole picker.<br>
+      Shift 1 (06:00–14:00) carries ~40% of daily volume · Shift 2 (14:00–22:00) carries ~57%.<br>
+      Minimum 1 picker per zone where activity exists. Low-volume zones share a picker on Shift 2.
+    </p>
+    <div class="plan-controls">
+      <div class="shift-tabs">
+        <button type="button" class="shift-tab-btn active" id="staff-tab-s1" onclick="setStaffShift('s1')">1st Shift</button>
+        <button type="button" class="shift-tab-btn" id="staff-tab-s2" onclick="setStaffShift('s2')">2nd Shift</button>
+        <button type="button" class="shift-tab-btn" id="staff-tab-s3" onclick="setStaffShift('s3')">3rd Shift</button>
+      </div>
+     <input id="staff-shift" type="hidden" value="s1">
+      <div class="shift-time-grid">
+        <div class="shift-time-card active" id="staff-config-s1">
+          <div class="shift-time-label">1st Shift</div>
+          <div class="plan-field"><label>Start Time</label><input id="staff-s1-start" type="time" value="06:00" onchange="buildStaffing()"></div>
+          <div class="plan-field"><label>End Time</label><input id="staff-s1-end" type="time" value="14:00" onchange="buildStaffing()"></div>
+          <div class="plan-field"><label>Actual Headcount</label><input id="staff-s1-actual" type="number" min="0" step="1" value="0" oninput="buildStaffing()"></div>
+        </div>
+        <div class="shift-time-card" id="staff-config-s2">
+          <div class="shift-time-label">2nd Shift</div>
+          <div class="plan-field"><label>Start Time</label><input id="staff-s2-start" type="time" value="14:00" onchange="buildStaffing()"></div>
+          <div class="plan-field"><label>End Time</label><input id="staff-s2-end" type="time" value="22:00" onchange="buildStaffing()"></div>
+          <div class="plan-field"><label>Actual Headcount</label><input id="staff-s2-actual" type="number" min="0" step="1" value="0" oninput="buildStaffing()"></div>
+        </div>
+        <div class="shift-time-card" id="staff-config-s3">
+          <div class="shift-time-label">3rd Shift</div>
+          <div class="plan-field"><label>Start Time</label><input id="staff-s3-start" type="time" value="22:00" onchange="buildStaffing()"></div>
+          <div class="plan-field"><label>End Time</label><input id="staff-s3-end" type="time" value="06:00" onchange="buildStaffing()"></div>
+          <div class="plan-field"><label>Actual Headcount</label><input id="staff-s3-actual" type="number" min="0" step="1" value="0" oninput="buildStaffing()"></div>
+        </div>
+      </div>
+     <div class="mini-note">Required Headcount = Σ(zone units ÷ (zone UPH × shift hours)), rounded up per zone. Compare against Actual Headcount for selected shift.</div>
+    </div>
+  </div>
+
+  <div class="summary-row" id="staff-summary"></div>
+
+  <div class="two-col">
+    <div class="shift-box">
+      <div class="shift-hdr">
+         <div><div class="shift-name" id="selected-shift-title">🌅 Shift 1 — First Shift</div><div class="shift-time" id="selected-shift-time">06:00 – 14:00 · 8 hours</div></div>
+        <div class="shift-total" id="s1-hc">—</div>
+      </div>
+      <div class="shift-body" id="s1-body"></div>
+    </div>
+    <div class="shift-box">
+      <div class="shift-hdr">
+         <div><div class="shift-name">🧩 Shift Change Layout (1st + 2nd)</div><div class="shift-time">Overlap staging and shared floor use</div></div>
+        <div class="shift-total" id="s2-hc">—</div>
+      </div>
+      <div class="shift-body" id="s2-body" style="padding:12px;"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Picker Calculation Detail</div>
+    <table id="staff-detail-table"></table>
+  </div>
+  
+  <div class="map-wrap">
+    <div class="card-title">Zone Flow Map — Associate Movement</div>
+    <p style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;margin-bottom:12px;">Shows standing position, start/end points by zone, and movement direction for selected shift.</p>
+    <canvas id="flow-canvas"></canvas>
+  </div>
+</div>
+
+<!-- RAMP -->
+<div id="sec-ramp" class="section">
+  <div class="card">
+    <div class="card-title">4-Week Operational Ramp Plan</div>
+    <p style="font-size:11px;color:var(--text2);font-family:'IBM Plex Mono',monospace;margin-bottom:16px;line-height:1.8;">
+      S1 carries structural headcount premium throughout ramp. Efficiency assumptions: Wk1=70% · Wk2=85% · Steady=100% of UPH target.<br>
+      S1 always larger than S2 · Cross-training completes by end of Week 2 · Full zone coverage from Day 1.
+    </p>
+    <div class="plan-controls">
+      <div class="plan-field">
+        <label>Ramp Shift</label>
+        <select id="ramp-shift" onchange="syncShiftInputs('ramp'); buildRamp()">
+          <option value="s1">1st Shift (06:00–14:00)</option>
+          <option value="s2">2nd Shift (14:00–22:00)</option>
+          <option value="s3">3rd Shift (22:00–06:00)</option>
+        </select>
+      </div>
+      <div class="plan-field">
+        <label>Start Time</label>
+        <input id="ramp-start" type="time" value="06:00" onchange="buildRamp()">
+      </div>
+      <div class="plan-field">
+        <label>End Time</label>
+        <input id="ramp-end" type="time" value="14:00" onchange="buildRamp()">
+      </div>
+      <div class="mini-note" id="ramp-volume-note"></div>
+    </div>
+    <table class="ramp-tbl">
+      <thead>
+        <tr>
+          <th>Zone</th><th>UPH</th><th>Daily Units</th>
+          <th colspan="2" style="text-align:center;background:rgba(6,182,212,0.07);color:var(--cyan)">CALC PICKERS</th>
+          <th colspan="2" style="text-align:center;background:rgba(59,130,246,0.07);color:#93c5fd">WEEK 1</th>
+          <th colspan="2" style="text-align:center;background:rgba(34,197,94,0.07);color:#86efac">WEEK 2</th>
+          <th colspan="2" style="text-align:center;background:rgba(245,158,11,0.07);color:#fcd34d">WK 3–4 STEADY</th>
+        </tr>
+        <tr style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3)">
+          <th></th><th></th><th></th>
+          <th style="text-align:center;background:rgba(6,182,212,0.04);color:var(--cyan)">S1</th>
+          <th style="text-align:center;background:rgba(6,182,212,0.04);color:var(--cyan)">S2</th>
+          <th style="text-align:center;background:rgba(59,130,246,0.04)">S1</th>
+          <th style="text-align:center;background:rgba(59,130,246,0.04)">S2</th>
+          <th style="text-align:center;background:rgba(34,197,94,0.04)">S1</th>
+          <th style="text-align:center;background:rgba(34,197,94,0.04)">S2</th>
+          <th style="text-align:center;background:rgba(245,158,11,0.04)">S1</th>
+          <th style="text-align:center;background:rgba(245,158,11,0.04)">S2</th>
+        </tr>
+      </thead>
+      <tbody id="ramp-body"></tbody>
+      <tfoot>
+        <tr style="border-top:2px solid var(--border);font-weight:700;font-family:'IBM Plex Mono',monospace;">
+          <td colspan="5" style="font-size:11px;letter-spacing:.06em;">TOTAL SCHEDULED</td>
+          <td class="rc" id="r-w1s1" style="background:rgba(59,130,246,0.07);color:#93c5fd"></td>
+          <td class="rc" id="r-w1s2" style="background:rgba(59,130,246,0.07);color:#93c5fd"></td>
+          <td class="rc" id="r-w2s1" style="background:rgba(34,197,94,0.07);color:#86efac"></td>
+          <td class="rc" id="r-w2s2" style="background:rgba(34,197,94,0.07);color:#86efac"></td>
+          <td class="rc" id="r-wss1" style="background:rgba(245,158,11,0.07);color:#fcd34d"></td>
+          <td class="rc" id="r-wss2" style="background:rgba(245,158,11,0.07);color:#fcd34d"></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+    <div style="background:rgba(59,130,246,0.07);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:14px;">
+      <div style="font-size:11px;font-weight:700;color:#93c5fd;margin-bottom:8px;letter-spacing:.06em">📅 WEEK 1 — LEARNING</div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.7;font-family:'IBM Plex Mono',monospace;">Extra S1 pickers for shadowing & zone orientation. ~70% efficiency. S2 at minimum viable crew. All zones covered Day 1.</div>
+    </div>
+    <div style="background:rgba(34,197,94,0.07);border:1px solid rgba(34,197,94,0.2);border-radius:8px;padding:14px;">
+      <div style="font-size:11px;font-weight:700;color:#86efac;margin-bottom:8px;letter-spacing:.06em">📅 WEEK 2 — BUILD</div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.7;font-family:'IBM Plex Mono',monospace;">S1 holds +2 buffer pickers. UPH at ~85% of target. S2 absorbs steady-state volume. Cross-training across zones begins.</div>
+    </div>
+    <div style="background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:14px;">
+      <div style="font-size:11px;font-weight:700;color:#fcd34d;margin-bottom:8px;letter-spacing:.06em">📅 WK 3–4 — STEADY</div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.7;font-family:'IBM Plex Mono',monospace;">Full UPH targets met. S1 premium maintained for zone coverage. Continuous monitoring. KPI review weekly.</div>
+    </div>
+  </div>
+</div>
 
 <!-- FORECAST DASHBOARD -->
 <div id="sec-forecast" class="section">
 
-  <!-- Controls -->
+  <!-- Upload + Controls -->
   <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Forecasting Dashboard — TensorFlow.js Time-Series Model</div>
+    <div class="card-title">Forecasting Dashboard — Two-Week Look-Ahead</div>
     <p style="font-size:11px;color:var(--text2);font-family:'IBM Plex Mono',monospace;line-height:1.8;margin-bottom:14px;">
-      Uses <strong style="color:var(--cyan)">TensorFlow.js</strong> regression model trained on the uploaded ops data.<br>
-      Features: <strong style="color:var(--cyan)">Timestamp</strong> (hour of day), <strong style="color:var(--cyan)">Day</strong> (one-hot encoded), <strong style="color:var(--cyan)">Category</strong> (one-hot encoded).<br>
-      The model predicts hourly unit volumes per zone. Filter by Category and Day to see forecasted staffing needs.
+      Upload the Excel file containing the <strong style="color:var(--cyan)">Forecast Data</strong> sheet. Expected columns: <strong style="color:var(--cyan)">Actual Start Time</strong>, <strong style="color:var(--cyan)">X</strong>, <strong style="color:var(--cyan)">Y</strong>, <strong style="color:var(--cyan)">Completed Units</strong>, <strong style="color:var(--cyan)">User ID</strong>, <strong style="color:var(--cyan)">Date</strong>, <strong style="color:var(--cyan)">Day</strong>, <strong style="color:var(--cyan)">Category</strong>.<br>
+      Select a Category, Day, and Hour to view the predicted zone volume map, heat density, and staffing needs for that specific window.
     </p>
 
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-      <span class="data-badge default" id="fc-data-badge">NO DATA</span>
-      <span id="fc-row-count" style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
-      <span id="fc-model-status" style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
+    <!-- Forecast Excel File Upload -->
+    <div class="drop-zone" id="fc-drop-zone" style="margin-bottom:14px;">
+      <input type="file" id="fc-file-input" accept=".xlsx,.xls" onchange="handleForecastFile(this.files[0])">
+      <div class="drop-icon">📂</div>
+      <div class="drop-text">
+        <strong>Drop updated Excel file here</strong>
+        <span>Sheet: "Forecast Data" · Columns: Actual Start Time, X, Y, Completed Units, User ID, Date, Day, Category</span>
+      </div>
     </div>
 
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
-      <button class="mctl" type="button" onclick="fcTrainAndForecast()" id="fc-train-btn">Train Model & Forecast</button>
-      <button class="mctl" type="button" onclick="fcClearAllFilters()">Clear Filters</button>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+      <span class="data-badge default" id="fc-data-badge">NO DATA LOADED</span>
+      <span id="fc-row-count" style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
     </div>
 
     <!-- Filter Controls — Toggle Buttons -->
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;margin-bottom:10px;">
+      <div id="fc-refresh-window-label" style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;">Window: All days · all hours</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button class="mctl" type="button" onclick="fcRefreshToCurrentWindow()">Refresh</button>
+        <button class="mctl" type="button" onclick="fcClearAllFilters()">Clear All</button>
+      </div>
+    </div>
     <div style="margin-top:14px;">
       <div style="margin-bottom:12px;">
         <label style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:6px;">Category</label>
@@ -1379,53 +1484,73 @@ tr:hover td { background: rgba(255,255,255,0.015); }
   <!-- KPI Summary -->
   <div class="kpi-row" id="fc-kpi-row" style="grid-template-columns:repeat(5,1fr);">
     <div class="kpi" style="--kpi-color:#3b82f6">
-      <div class="kpi-lbl">Forecasted Units</div>
+      <div class="kpi-lbl">Total Completed Units</div>
       <div class="kpi-val mono" id="fc-kpi-volume">—</div>
-      <div class="kpi-sub" id="fc-kpi-volume-sub">predicted total</div>
+      <div class="kpi-sub" id="fc-kpi-volume-sub">select filters above</div>
     </div>
     <div class="kpi" style="--kpi-color:#22c55e">
-      <div class="kpi-lbl">Actual Units</div>
+      <div class="kpi-lbl">Zones Active</div>
       <div class="kpi-val mono" id="fc-kpi-zones">—</div>
-      <div class="kpi-sub">from uploaded data</div>
+      <div class="kpi-sub">with completed units</div>
     </div>
     <div class="kpi" style="--kpi-color:#f59e0b">
-      <div class="kpi-lbl">Model Accuracy</div>
+      <div class="kpi-lbl">Unique Pickers</div>
       <div class="kpi-val mono" id="fc-kpi-pickers">—</div>
-      <div class="kpi-sub">R-squared</div>
+      <div class="kpi-sub">active in selection</div>
     </div>
     <div class="kpi" style="--kpi-color:#8b5cf6">
-      <div class="kpi-lbl">Peak Hour</div>
+      <div class="kpi-lbl">Peak Zone</div>
       <div class="kpi-val" id="fc-kpi-peak" style="font-size:18px;">—</div>
-      <div class="kpi-sub" id="fc-kpi-peak-sub">highest predicted volume</div>
+      <div class="kpi-sub" id="fc-kpi-peak-sub">highest volume</div>
     </div>
     <div class="kpi" style="--kpi-color:#06b6d4">
-      <div class="kpi-lbl">Training Loss</div>
+      <div class="kpi-lbl">Active Picking Hours</div>
       <div class="kpi-val mono" id="fc-kpi-active-hours">—</div>
-      <div class="kpi-sub" id="fc-kpi-active-hours-sub">MSE after training</div>
+      <div class="kpi-sub" id="fc-kpi-active-hours-sub">pick-to-pick by associate</div>
     </div>
   </div>
 
-  <!-- Forecast Hourly Chart — Actual vs Predicted -->
-  <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Hourly Volume — Actual vs Forecast <span id="fc-hourly-label" style="font-size:10px;font-weight:400;color:var(--cyan);font-family:'IBM Plex Mono',monospace;margin-left:8px;"></span></div>
-    <canvas id="fc-hourly-canvas" height="220"></canvas>
+  <!-- Zone Map + Heat Map side by side -->
+  <div class="two-col" style="margin-bottom:16px;">
+    <div class="map-wrap" style="margin-bottom:0;">
+      <div class="card-title">Forecast Overview — Zone Map</div>
+      <p style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;margin-bottom:10px;">
+        Zone fill intensity proportional to completed units for selected Category · Day · Hour
+      </p>
+      <canvas id="fc-zone-canvas"></canvas>
+      <div class="legend" id="fc-zone-legend" style="margin-top:10px;"></div>
+    </div>
+    <div class="map-wrap" style="margin-bottom:0;">
+      <div class="card-title">Forecast Heat Intensity — Pick Density</div>
+      <p style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;margin-bottom:10px;">
+        Heat intensity plotted from X/Y coordinates · higher density = warmer colors · 2×2 unit grid
+      </p>
+      <canvas id="fc-heat-canvas"></canvas>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+        <span style="font-size:10px;color:var(--text3)">Low</span>
+        <div style="flex:1;max-width:180px;height:6px;border-radius:4px;background:linear-gradient(to right,#0c1a3b,#1e40af,#2563eb,#f59e0b,#ef4444,#7f1d1d)"></div>
+        <span style="font-size:10px;color:var(--text3)">High</span>
+      </div>
+    </div>
   </div>
 
-  <!-- Zone Forecast Staffing Table -->
+  <!-- Staffing Requirements Table -->
   <div class="card">
-    <div class="card-title">Zone Volume & Staffing — Forecast</div>
+    <div class="card-title">Zone Volume & Staffing — Forecast Data</div>
     <p style="font-size:11px;color:var(--text2);font-family:'IBM Plex Mono',monospace;margin-bottom:14px;">
-      Forecasted volume and staffing per zone. Required Pickers = ceil(Forecasted Units ÷ (Zone UPH x Hours)).
+      Volume and required staffing guidance per zone based on the selected Category, Day, and Hour.
+      Required Hours = Volume ÷ Zone UPH. Required Pickers = ceil(Required Hours ÷ Selected Hours Filter); if no hour filter is selected, the range from first pick hour to last pick hour is used (supports next-day hours like 2 AM).
     </p>
     <table id="fc-staffing-table">
       <thead>
         <tr>
           <th>Zone</th>
-          <th>Actual Units</th>
-          <th>Forecasted Units</th>
+          <th>Completed Units</th>
           <th style="text-align:center;">Volume Share</th>
           <th style="text-align:center;">Zone UPH Target</th>
           <th style="text-align:center;">Required Pickers</th>
+          <th style="text-align:center;">Required Hours</th>
+          <th style="text-align:center;">Recommended Move</th>
           <th style="width:180px;">Volume Bar</th>
         </tr>
       </thead>
@@ -1433,183 +1558,61 @@ tr:hover td { background: rgba(255,255,255,0.015); }
       <tfoot>
         <tr style="border-top:2px solid var(--border);font-weight:700;">
           <td style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.06em;">TOTAL</td>
-          <td class="mono" id="fc-staff-total-actual">—</td>
           <td class="mono" id="fc-staff-total-vol">—</td>
           <td class="mono" style="text-align:center;">100%</td>
           <td></td>
           <td class="mono" style="text-align:center;" id="fc-staff-total-pickers">—</td>
+          <td class="mono" style="text-align:center;" id="fc-staff-total-required-hours">—</td>
+          <td></td>
           <td></td>
         </tr>
       </tfoot>
     </table>
   </div>
 
-</div>
-
-<!-- MATERIAL BANK ORDER VIEW DASHBOARD -->
-<div id="sec-ordersmix-mb" class="section">
-
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-    <div style="display:flex;align-items:center;gap:10px;">
-      <span style="font-size:16px;font-weight:700;letter-spacing:-0.02em;">Material Bank Order View Details</span>
-    </div>
-    <span id="mb-date-label" style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
-  </div>
-
-  <!-- KPI Row -->
-  <div class="kpi-row" style="grid-template-columns:repeat(6,1fr);">
-    <div class="kpi" style="--kpi-color:var(--cyan)">
-      <div class="kpi-lbl">Total Orders</div>
-      <div class="kpi-val" id="mb-kpi-orders">—</div>
-      <div class="kpi-sub" id="mb-kpi-orders-sub">unique order numbers</div>
-    </div>
-    <div class="kpi" style="--kpi-color:var(--blue)">
-      <div class="kpi-lbl">Total Units</div>
-      <div class="kpi-val" id="mb-kpi-units">—</div>
-      <div class="kpi-sub" id="mb-kpi-units-sub">across all orders</div>
-    </div>
-    <div class="kpi" style="--kpi-color:var(--green)">
-      <div class="kpi-lbl">Units per Order</div>
-      <div class="kpi-val" id="mb-kpi-upo">—</div>
-      <div class="kpi-sub">avg units / order</div>
-    </div>
-    <div class="kpi" style="--kpi-color:var(--amber)">
-      <div class="kpi-lbl">Product Categories</div>
-      <div class="kpi-val" id="mb-kpi-cats">—</div>
-      <div class="kpi-sub">distinct product categories</div>
-    </div>
-    <div class="kpi" style="--kpi-color:var(--purple)">
-      <div class="kpi-lbl">Product Brands</div>
-      <div class="kpi-val" id="mb-kpi-brands">—</div>
-      <div class="kpi-sub">distinct brands</div>
-    </div>
-    <div class="kpi" style="--kpi-color:#f97316">
-      <div class="kpi-lbl">Non-Tile/Carpet/WG</div>
-      <div class="kpi-val" id="mb-kpi-nontcw">—</div>
-      <div class="kpi-sub">orders without Tile, Carpet, or Wolf Gordon</div>
-    </div>
-  </div>
-
-  <!-- Category Mix Donut + Table -->
-  <div style="display:grid;grid-template-columns:340px 1fr;gap:16px;margin-bottom:16px;">
-    <div class="card">
-      <div class="card-title">Product Category Mix — % of Orders</div>
-      <canvas id="mb-donut-canvas" width="300" height="300"></canvas>
-    </div>
-    <div class="card">
-      <div class="card-title">Product Category Breakdown</div>
-      <table style="width:100%;font-size:12px;font-family:'IBM Plex Mono',monospace;">
-        <thead>
-          <tr style="border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);">
-            <th style="text-align:left;padding:8px 6px;">Product Category</th>
-            <th style="text-align:center;padding:8px 6px;">Orders</th>
-            <th style="text-align:center;padding:8px 6px;">Units</th>
-            <th style="text-align:center;padding:8px 6px;">Units/Order</th>
-            <th style="text-align:center;padding:8px 6px;">% of Orders</th>
-            <th style="text-align:center;padding:8px 6px;">% of Units</th>
-            <th style="width:160px;padding:8px 6px;">Distribution</th>
-          </tr>
-        </thead>
-        <tbody id="mb-cat-body"></tbody>
-        <tfoot>
-          <tr style="border-top:2px solid var(--border);font-weight:700;">
-            <td style="padding:8px 6px;">TOTAL</td>
-            <td style="text-align:center;padding:8px 6px;" id="mb-cat-total-orders">—</td>
-            <td style="text-align:center;padding:8px 6px;" id="mb-cat-total-units">—</td>
-            <td style="text-align:center;padding:8px 6px;" id="mb-cat-total-upo">—</td>
-            <td style="text-align:center;padding:8px 6px;">100%</td>
-            <td style="text-align:center;padding:8px 6px;">100%</td>
-            <td></td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  </div>
-
-  <!-- Hourly Orders Chart -->
-  <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Hourly Order Volume by Product Category</div>
-    <canvas id="mb-hourly-canvas" height="200"></canvas>
-  </div>
-
-  <!-- Brand Breakdown Table -->
-  <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Product Brand Breakdown</div>
-    <table style="width:100%;font-size:12px;font-family:'IBM Plex Mono',monospace;">
-      <thead>
-        <tr style="border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);">
-          <th style="text-align:left;padding:8px 6px;">Product Brand</th>
-          <th style="text-align:center;padding:8px 6px;">Product Category</th>
-          <th style="text-align:center;padding:8px 6px;">Orders</th>
-          <th style="text-align:center;padding:8px 6px;">Units</th>
-          <th style="text-align:center;padding:8px 6px;">Units/Order</th>
-          <th style="text-align:center;padding:8px 6px;">% of Orders</th>
-          <th style="width:180px;padding:8px 6px;">Volume Bar</th>
-        </tr>
-      </thead>
-      <tbody id="mb-brand-body"></tbody>
-    </table>
-  </div>
-
-  <!-- Order Detail Table -->
-  <div class="card">
-    <div class="card-title">Order Details <span id="mb-detail-count" style="font-size:10px;font-weight:400;color:var(--text3);font-family:'IBM Plex Mono',monospace;margin-left:8px;"></span></div>
-    <div style="max-height:400px;overflow-y:auto;">
-      <table style="width:100%;font-size:11px;font-family:'IBM Plex Mono',monospace;">
-        <thead style="position:sticky;top:0;background:var(--surf2);z-index:1;">
-          <tr style="border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);">
-            <th style="text-align:left;padding:8px 6px;">Order Number</th>
-            <th style="text-align:center;padding:8px 6px;">Drop Off Location</th>
-            <th style="text-align:center;padding:8px 6px;">Product Category</th>
-            <th style="text-align:center;padding:8px 6px;">Product Brand</th>
-            <th style="text-align:center;padding:8px 6px;">Units</th>
-            <th style="text-align:center;padding:8px 6px;">Lines</th>
-            <th style="text-align:center;padding:8px 6px;">First Pick</th>
-            <th style="text-align:left;padding:8px 6px;">Picker(s)</th>
-          </tr>
-        </thead>
-        <tbody id="mb-detail-body"></tbody>
-      </table>
-    </div>
+  <!-- Hourly Volume Profile for Selected Day -->
+  <div class="card" style="margin-top:16px;">
+    <div class="card-title">Hourly Volume Profile <span id="fc-hourly-label" style="font-size:10px;font-weight:400;color:var(--cyan);font-family:'IBM Plex Mono',monospace;margin-left:8px;"></span></div>
+    <canvas id="fc-hourly-canvas" height="180"></canvas>
   </div>
 
 </div>
 
-<!-- FULFILLMENT ORDER VIEW DASHBOARD -->
-<div id="sec-ordersmix-ful" class="section">
+<!-- ORDERS BY CATEGORY DASHBOARD -->
+<div id="sec-ordersmix" class="section">
 
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
     <div style="display:flex;align-items:center;gap:10px;">
-      <span style="font-size:16px;font-weight:700;letter-spacing:-0.02em;">Fulfillment Order View Details</span>
+      <span style="font-size:16px;font-weight:700;letter-spacing:-0.02em;">Overview of Daily Orders by Product Mix Based on Category</span>
     </div>
-    <span id="ful-date-label" style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
+    <span id="om-date-label" style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
   </div>
 
   <!-- KPI Row -->
   <div class="kpi-row" style="grid-template-columns:repeat(5,1fr);">
     <div class="kpi" style="--kpi-color:var(--cyan)">
       <div class="kpi-lbl">Total Orders</div>
-      <div class="kpi-val" id="ful-kpi-orders">—</div>
-      <div class="kpi-sub" id="ful-kpi-orders-sub">unique order numbers</div>
+      <div class="kpi-val" id="om-kpi-orders">—</div>
+      <div class="kpi-sub" id="om-kpi-orders-sub">unique order numbers</div>
     </div>
     <div class="kpi" style="--kpi-color:var(--blue)">
       <div class="kpi-lbl">Total Units</div>
-      <div class="kpi-val" id="ful-kpi-units">—</div>
-      <div class="kpi-sub" id="ful-kpi-units-sub">across all orders</div>
+      <div class="kpi-val" id="om-kpi-units">—</div>
+      <div class="kpi-sub" id="om-kpi-units-sub">across all orders</div>
     </div>
     <div class="kpi" style="--kpi-color:var(--green)">
       <div class="kpi-lbl">Units per Order</div>
-      <div class="kpi-val" id="ful-kpi-upo">—</div>
+      <div class="kpi-val" id="om-kpi-upo">—</div>
       <div class="kpi-sub">avg units / order</div>
     </div>
     <div class="kpi" style="--kpi-color:var(--amber)">
       <div class="kpi-lbl">Product Categories</div>
-      <div class="kpi-val" id="ful-kpi-cats">—</div>
+      <div class="kpi-val" id="om-kpi-cats">—</div>
       <div class="kpi-sub">distinct product categories</div>
     </div>
     <div class="kpi" style="--kpi-color:var(--purple)">
       <div class="kpi-lbl">Product Brands</div>
-      <div class="kpi-val" id="ful-kpi-brands">—</div>
+      <div class="kpi-val" id="om-kpi-brands">—</div>
       <div class="kpi-sub">distinct brands</div>
     </div>
   </div>
@@ -1618,7 +1621,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
   <div style="display:grid;grid-template-columns:340px 1fr;gap:16px;margin-bottom:16px;">
     <div class="card">
       <div class="card-title">Product Category Mix — % of Orders</div>
-      <canvas id="ful-donut-canvas" width="300" height="300"></canvas>
+      <canvas id="om-donut-canvas" width="300" height="300"></canvas>
     </div>
     <div class="card">
       <div class="card-title">Product Category Breakdown</div>
@@ -1634,13 +1637,13 @@ tr:hover td { background: rgba(255,255,255,0.015); }
             <th style="width:160px;padding:8px 6px;">Distribution</th>
           </tr>
         </thead>
-        <tbody id="ful-cat-body"></tbody>
+        <tbody id="om-cat-body"></tbody>
         <tfoot>
           <tr style="border-top:2px solid var(--border);font-weight:700;">
             <td style="padding:8px 6px;">TOTAL</td>
-            <td style="text-align:center;padding:8px 6px;" id="ful-cat-total-orders">—</td>
-            <td style="text-align:center;padding:8px 6px;" id="ful-cat-total-units">—</td>
-            <td style="text-align:center;padding:8px 6px;" id="ful-cat-total-upo">—</td>
+            <td style="text-align:center;padding:8px 6px;" id="om-cat-total-orders">—</td>
+            <td style="text-align:center;padding:8px 6px;" id="om-cat-total-units">—</td>
+            <td style="text-align:center;padding:8px 6px;" id="om-cat-total-upo">—</td>
             <td style="text-align:center;padding:8px 6px;">100%</td>
             <td style="text-align:center;padding:8px 6px;">100%</td>
             <td></td>
@@ -1653,7 +1656,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
   <!-- Hourly Orders Chart -->
   <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Hourly Order Volume by Product Category</div>
-    <canvas id="ful-hourly-canvas" height="200"></canvas>
+    <canvas id="om-hourly-canvas" height="200"></canvas>
   </div>
 
   <!-- Brand Breakdown Table -->
@@ -1671,19 +1674,18 @@ tr:hover td { background: rgba(255,255,255,0.015); }
           <th style="width:180px;padding:8px 6px;">Volume Bar</th>
         </tr>
       </thead>
-      <tbody id="ful-brand-body"></tbody>
+      <tbody id="om-brand-body"></tbody>
     </table>
   </div>
 
   <!-- Order Detail Table -->
   <div class="card">
-    <div class="card-title">Order Details <span id="ful-detail-count" style="font-size:10px;font-weight:400;color:var(--text3);font-family:'IBM Plex Mono',monospace;margin-left:8px;"></span></div>
+    <div class="card-title">Order Details <span id="om-detail-count" style="font-size:10px;font-weight:400;color:var(--text3);font-family:'IBM Plex Mono',monospace;margin-left:8px;"></span></div>
     <div style="max-height:400px;overflow-y:auto;">
       <table style="width:100%;font-size:11px;font-family:'IBM Plex Mono',monospace;">
         <thead style="position:sticky;top:0;background:var(--surf2);z-index:1;">
           <tr style="border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);">
             <th style="text-align:left;padding:8px 6px;">Order Number</th>
-            <th style="text-align:center;padding:8px 6px;">Drop Off Location</th>
             <th style="text-align:center;padding:8px 6px;">Product Category</th>
             <th style="text-align:center;padding:8px 6px;">Product Brand</th>
             <th style="text-align:center;padding:8px 6px;">Units</th>
@@ -1692,7 +1694,7 @@ tr:hover td { background: rgba(255,255,255,0.015); }
             <th style="text-align:left;padding:8px 6px;">Picker(s)</th>
           </tr>
         </thead>
-        <tbody id="ful-detail-body"></tbody>
+        <tbody id="om-detail-body"></tbody>
       </table>
     </div>
   </div>
@@ -1775,37 +1777,16 @@ function updateOpsMetadataLabels() {
 
 function parseOpsDateValue(cell) {
   if(cell == null || cell === '') return '';
-  // Excel serial date number
-  if(typeof cell === 'number' && Number.isFinite(cell) && cell > 1) {
-    try {
-      const dateObj = XLSX.SSF.parse_date_code(cell);
-      if(dateObj && dateObj.y) {
-        return `${String(dateObj.y).padStart(4,'0')}-${String(dateObj.m).padStart(2,'0')}-${String(dateObj.d).padStart(2,'0')}`;
-      }
-    } catch(e) { /* fall through to string parsing */ }
+  if(typeof cell === 'number' && Number.isFinite(cell)) {
+    const dateObj = XLSX.SSF.parse_date_code(cell);
+    if(dateObj && dateObj.y) {
+      return `${String(dateObj.y).padStart(4,'0')}-${String(dateObj.m).padStart(2,'0')}-${String(dateObj.d).padStart(2,'0')}`;
+    }
   }
-  // JavaScript Date object
   if(Object.prototype.toString.call(cell) === '[object Date]' && !isNaN(cell.getTime())) {
     return `${cell.getFullYear()}-${String(cell.getMonth()+1).padStart(2,'0')}-${String(cell.getDate()).padStart(2,'0')}`;
   }
-  // String date parsing — handles "M/D/YYYY", "MM/DD/YYYY", "YYYY-MM-DD", "M-D-YYYY" etc.
-  const s = String(cell).trim();
-  // Try M/D/YYYY or MM/DD/YYYY (with / or -)
-  const mdy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if(mdy) {
-    return `${mdy[3]}-${String(mdy[1]).padStart(2,'0')}-${String(mdy[2]).padStart(2,'0')}`;
-  }
-  // Try YYYY-MM-DD or YYYY/MM/DD
-  const ymd = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
-  if(ymd) {
-    return `${ymd[1]}-${String(ymd[2]).padStart(2,'0')}-${String(ymd[3]).padStart(2,'0')}`;
-  }
-  // Fallback: try Date constructor
-  const dt = new Date(s);
-  if(!isNaN(dt.getTime()) && dt.getFullYear() > 1970) {
-    return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
-  }
-  return s;
+  return String(cell).trim();
 }
 
 function normalizePromoType(value) {
@@ -1832,13 +1813,6 @@ function updateOpsDateSelector() {
 }
 
 function applyOpsFilters() {
-  if(selectedOpsDate && !uploadedTxAll.some(r => r.dateValue === selectedOpsDate)) {
-    const firstAvailableDate = uploadedTxAll.find(r => r.dateValue)?.dateValue || '';
-    selectedOpsDate = firstAvailableDate;
-    const dateSelect = document.getElementById('ops-date-filter');
-    if(dateSelect) dateSelect.value = selectedOpsDate;
-  }
-
   const filtered = uploadedTxAll.filter(r => {
     if(selectedOpsDate && r.dateValue !== selectedOpsDate) return false;
     return true;
@@ -1855,7 +1829,7 @@ function applyOpsFilters() {
   document.getElementById('date-range').textContent = selectedOpsDate ? `${selectedOpsDate} · ${categoryText} · ${dayText}` : (droppedFileName || 'Uploaded file');
 
   if(!filtered.length) {
-    showRefreshToast('⚠️ No valid transaction rows were found in the uploaded file for the selected date.');
+    showRefreshToast('⚠️ No valid transaction rows found in uploaded file for the selected date.');
   }
 
   updateLastRefreshed();
@@ -2096,11 +2070,6 @@ function setProgress(pct) {
   else { fill.style.width = pct + '%'; }
 }
 
-function setUploadStatus(message) {
-  const status = document.getElementById('date-range');
-  if(status) status.textContent = message;
-}
-
 function handleFile(file) {
   if(!file) return;
   const fileInput = document.getElementById('file-input');
@@ -2108,7 +2077,6 @@ function handleFile(file) {
   isOpsDataProcessing = true;
   pendingShiftBreakdownCalc = false;
   setProgress(0);
-  setUploadStatus(`Processing ${file.name} ...`);
   const reader = new FileReader();
   reader.onload = e => {
     setProgress(30);
@@ -2116,7 +2084,6 @@ function handleFile(file) {
       try {
       const wb = XLSX.read(e.target.result, {type:'array'});
       const sheetName = wb.SheetNames.find(s => s.toLowerCase().includes('drop')) || wb.SheetNames[0];
-      setUploadStatus(`Parsing ${file.name} · sheet: ${sheetName}`);
       const ws = wb.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true});
       setProgress(60);
@@ -2136,38 +2103,33 @@ function handleFile(file) {
       // Support "complete dashboard" exports by locating the actual header row/columns
       // instead of assuming A–E are always Time, X, Y, Units, User ID.
       let headerRowIdx = 0;
-      let bestHeaderScore = -1;
-      let colTime = 0, colX = 1, colY = 2, colUnits = 3, colUser = 4, colDate = 5, colDay = 6, colPromo = 7, colOrder = 8, colBrand = 9, colDropOff = -1;
-      for(let i = 0; i < Math.min(rows.length, 120); i++) {
+      let colTime = 0, colX = 1, colY = 2, colUnits = 3, colUser = 4, colDate = 5, colDay = 6, colPromo = 7, colOrder = 8, colBrand = 9;
+      for(let i = 0; i < Math.min(rows.length, 30); i++) {
         const hdr = (rows[i] || []).map(normalizeHeader);
-        const txIdx = findFirstMatch(hdr, ['time of transaction', 'transaction time', 'time transaction', 'transaction timestamp', 'time']);
-        const xIdx = findFirstMatch(hdr, ['x coordinate', 'x coordinates', 'x coord', 'x location', 'x']);
-        const yIdx = findFirstMatch(hdr, ['y coordinate', 'y coordinates', 'y coord', 'y location', 'y']);
-        const unitsIdx = findFirstMatch(hdr, ['units', 'unit', 'qty', 'quantity', 'pieces']);
-        const score = [txIdx, xIdx, yIdx, unitsIdx].filter(idx => idx >= 0).length;
-        if(score < 3 || score <= bestHeaderScore) continue;
-
-        headerRowIdx = i;
-        bestHeaderScore = score;
-        if(txIdx >= 0) colTime = txIdx;
-        if(xIdx >= 0) colX = xIdx;
-        if(yIdx >= 0) colY = yIdx;
-        if(unitsIdx >= 0) colUnits = unitsIdx;
-        const userIdx = findFirstMatch(hdr, ['user id', 'user', 'associate', 'picker']);
-        if(userIdx >= 0) colUser = userIdx;
-        const dateIdx = findFirstMatch(hdr, ['date', 'transaction date']);
-        if(dateIdx >= 0) colDate = dateIdx;
-        const promoIdx = findFirstMatch(hdr, ['promo type', 'promo', 'category', 'type']);
-        if(promoIdx >= 0) colPromo = promoIdx;
-        const dayIdx = findFirstMatch(hdr, ['day', 'day of week', 'dayofweek']);
-        if(dayIdx >= 0) colDay = dayIdx;
-        const orderIdx = findFirstMatch(hdr, ['order number', 'order no', 'order', 'ordernumber']);
-        if(orderIdx >= 0) colOrder = orderIdx;
-        const brandIdx = findFirstMatch(hdr, ['product brand', 'brand', 'productbrand']);
-        if(brandIdx >= 0) colBrand = brandIdx;
-        const dropOffIdx = findFirstMatch(hdr, ['drop off location', 'dropoff location', 'drop off', 'dropofflocation']);
-        if(dropOffIdx >= 0) colDropOff = dropOffIdx;
-        if(score === 4) break;
+        const txIdx = findFirstMatch(hdr, ['time of transaction', 'transaction time', 'time transaction', 'time']);
+        const xIdx = findFirstMatch(hdr, ['x coordinate', 'x coord', 'x']);
+        const yIdx = findFirstMatch(hdr, ['y coordinate', 'y coord', 'y']);
+        const unitsIdx = findFirstMatch(hdr, ['units', 'qty', 'quantity']);
+        if(txIdx >= 0 && xIdx >= 0 && yIdx >= 0 && unitsIdx >= 0) {
+          headerRowIdx = i;
+          colTime = txIdx;
+          colX = xIdx;
+          colY = yIdx;
+          colUnits = unitsIdx;
+          const userIdx = findFirstMatch(hdr, ['user id', 'userid', 'user']);
+          if(userIdx >= 0) colUser = userIdx;
+          const dateIdx = findFirstMatch(hdr, ['date']);
+          if(dateIdx >= 0) colDate = dateIdx;
+          const promoIdx = findFirstMatch(hdr, ['promo type', 'promo', 'category', 'type']);
+          if(promoIdx >= 0) colPromo = promoIdx;
+          const dayIdx = findFirstMatch(hdr, ['day', 'day of week', 'dayofweek']);
+          if(dayIdx >= 0) colDay = dayIdx;
+          const orderIdx = findFirstMatch(hdr, ['order number', 'order no', 'order', 'ordernumber']);
+          if(orderIdx >= 0) colOrder = orderIdx;
+          const brandIdx = findFirstMatch(hdr, ['product brand', 'brand', 'productbrand']);
+          if(brandIdx >= 0) colBrand = brandIdx;
+          break;
+        }
       }
 
       for(let i = headerRowIdx + 1; i < rows.length; i++) {
@@ -2199,7 +2161,7 @@ function handleFile(file) {
         const y = yLooksNumeric ? parseFloat(yTxtRaw) : NaN;
         if(!isNA && (isNaN(x) || isNaN(y))) continue;
 
-        // Parse hour AND minute from col A (handles Excel serial, 24h strings, and AM/PM strings)
+        // Parse hour AND minute from col A
         let hour = 0, minute = 0;
        const t = r[colTime];
         if(typeof t === 'number') {
@@ -2207,17 +2169,8 @@ function handleFile(file) {
           hour = Math.floor(frac * 24);
           minute = Math.floor((frac * 24 - hour) * 60);
         } else if(typeof t === 'string') {
-          const m = t.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i);
-          if(m) {
-            hour = parseInt(m[1]);
-            minute = parseInt(m[2]);
-            const ampm = (m[4] || '').toLowerCase();
-            if(ampm === 'pm' && hour < 12) hour += 12;
-            if(ampm === 'am' && hour === 12) hour = 0;
-          }
-        } else if(Object.prototype.toString.call(t) === '[object Date]' && !isNaN(t.getTime())) {
-          hour = t.getHours();
-          minute = t.getMinutes();
+          const m = t.match(/(\d+):(\d+)/);
+          if(m) { hour = parseInt(m[1]); minute = parseInt(m[2]); }
         }
         // User ID from col E
         const userId = (r[colUser] != null && r[colUser] !== '') ? String(r[colUser]).trim() : 'Unknown';
@@ -2226,8 +2179,7 @@ function handleFile(file) {
         const orderNumber = (r[colOrder] != null && r[colOrder] !== '') ? String(r[colOrder]).trim() : '';
         const productBrand = (r[colBrand] != null && r[colBrand] !== '') ? String(r[colBrand]).trim() : '';
         const dayOfWeek = (r[colDay] != null && r[colDay] !== '') ? String(r[colDay]).trim() : '';
-        const dropOffLocation = (colDropOff >= 0 && r[colDropOff] != null && r[colDropOff] !== '') ? normalizeDropOffValue(r[colDropOff]) : '';
-        newTx.push({x: isNA ? NaN : x, y: isNA ? NaN : y, units, hour, minute, userId, isNA, dateValue, promoType, orderNumber, productBrand, dayOfWeek, dropOffLocation});
+        newTx.push({x: isNA ? NaN : x, y: isNA ? NaN : y, units, hour, minute, userId, isNA, dateValue, promoType, orderNumber, productBrand, dayOfWeek});
       }
       setProgress(80);
       
@@ -2237,7 +2189,6 @@ function handleFile(file) {
         isOpsDataProcessing = false;
         pendingShiftBreakdownCalc = false;
         setProgress(100);
-        setUploadStatus('Upload failed · please verify sheet/columns');
         showRefreshToast('⚠️ Upload parse failed. Please verify the sheet/columns and try again.');
         console.error('handleFile parse error', err);
       }
@@ -2247,7 +2198,6 @@ function handleFile(file) {
     isOpsDataProcessing = false;
     pendingShiftBreakdownCalc = false;
     setProgress(100);
-    setUploadStatus('File read failed');
     showRefreshToast('⚠️ File read failed. Please try re-uploading the file.');
   };
   reader.readAsArrayBuffer(file);
@@ -2265,13 +2215,11 @@ function assignZonesAndBuild(rows, filename) {
     }
     const pctDone = rows.length ? (i / rows.length) : 1;
     setProgress(80 + pctDone * 15);
-    document.getElementById('row-count').textContent = `Processed ${i.toLocaleString()} / ${rows.length.toLocaleString()}`;
     if(i < rows.length) {
       setTimeout(processChunk, 0);
     } else {
       uploadedTxAll = rows;
       dataSource = 'dropped';
-      document.getElementById('row-count').textContent = `Processed ${rows.length.toLocaleString()} / ${rows.length.toLocaleString()}`;
       zoneStatsSelectedIntervals = [];
       selectedHour = null;
       selectedHourWindow = null;
@@ -2533,11 +2481,12 @@ function renderAll() {
   runSectionUpdate('zone-stats', buildZoneStats);
   runSectionUpdate('shift-breakdown', buildShiftBreakdown);
   runSectionUpdate('pick-path', buildPickerList);
+  runSectionUpdate('staffing', buildStaffing);
+  runSectionUpdate('ramp-plan', buildRamp);
   runSectionUpdate('zone-bounds-table', buildBoundsTable);
   runSectionUpdate('uph-targets', buildUPHTargets);
   runSectionUpdate('inactive-leaderboard', buildInactiveLeaderboard);
-  runSectionUpdate('orders-mb', buildOrdersMixMB);
-  runSectionUpdate('orders-ful', buildOrdersMixFul);
+  runSectionUpdate('orders-mix', buildOrdersMix);
   updateDataBadge();
 }
 
@@ -4257,7 +4206,206 @@ function buildBoundsTable() {
 // ═══════════════════════════════════════════════
 // STAFFING
 // ═══════════════════════════════════════════════
-// (Staffing Plan and Ramp Plan removed)
+function buildStaffing() {
+  const order = ['ZONE 1','Paint','ZONE 2','ZONE 5','ZONE 3','Wolf gordon','Big Rack','ZONE 4','Nora','Promo','Samplize','No Location'];
+  const selectedShiftKey = document.getElementById('staff-shift')?.value || 's1';
+  const { start, end, base, actual } = getStaffShiftConfig(selectedShiftKey);
+  const hours = (end <= start ? (end + 24 - start) : (end - start)) || 8;
+  const windowZones = getWindowZoneData(start, end);
+  const associatesByZone = getAssociatesByZone(start, end);
+
+  const selectedTitle = document.getElementById('selected-shift-title');
+  const selectedTime = document.getElementById('selected-shift-time');
+  if(selectedTitle) selectedTitle.textContent = `${base.emoji} ${base.label} — Dynamic Staffing`;
+  if(selectedTime) selectedTime.textContent = `${String(Math.floor(start)%24).padStart(2,'0')}:${String(Math.round((start%1)*60)).padStart(2,'0')} – ${String(Math.floor(end)%24).padStart(2,'0')}:${String(Math.round((end%1)*60)).padStart(2,'0')} · ${hours.toFixed(1)} hours`;
+
+  let totalSel = 0;
+  let body = '';
+  order.forEach(z => {
+    const c = ZONE_COLORS[z]||'#64748b';
+    const units = (windowZones[z]?.units || 0);
+    const uph = UPH[z] || 150;
+    const need = units > 0 ? Math.max(1, Math.ceil(units / (uph * hours))) : 0;
+    totalSel += need;
+    const associates = associatesByZone[z] || [];
+    const dots = Array(need).fill(`<div class="pdot" style="background:${c}"></div>`).join('');
+    body += `<div class="prow">
+      <div class="pzone-name"><span style="width:7px;height:7px;border-radius:2px;background:${c};display:inline-block;flex-shrink:0"></span>${z}</div>
+      <div class="pcount-wrap">
+        <div style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;min-width:100px;text-align:right;">${Math.round(units)}u · ${associates.length} assoc</div>
+        <div class="pdots">${dots}</div>
+        <div class="pnum" style="color:${c}">${need}</div>
+      </div>
+    </div>`;
+  });
+  
+  document.getElementById('s1-body').innerHTML = body;
+  const hcDelta = actual - totalSel;
+  const hcStatus = hcDelta >= 0 ? `+${hcDelta} over` : `${Math.abs(hcDelta)} under`;
+  document.getElementById('s1-hc').textContent = `${totalSel} req / ${actual} act`;
+  document.getElementById('s1-hc').style.color = hcDelta >= 0 ? 'var(--green)' : 'var(--amber)';
+
+  const s1 = STEADY;
+  const s1Tot = Object.values(s1).reduce((t,v)=>t+(v.s1||0),0);
+  const s2Tot = Object.values(s1).reduce((t,v)=>t+(v.s2||0),0);
+  const overlapHtml = `<div style="font-size:11px;color:var(--text2);font-family:'IBM Plex Mono',monospace;line-height:1.8;">
+    <div style="margin-bottom:8px;"><b style="color:#93c5fd">Combined transition headcount:</b> <span style="color:#fcd34d">${s1Tot + s2Tot}</span> associates</div>
+    <canvas id="transition-canvas"></canvas>
+    <div style="margin-top:8px;color:var(--text3);">Layout map highlights shared aisles and staggered entry lanes for 1st/2nd shift overlap.</div>
+  </div>`;
+  document.getElementById('s2-body').innerHTML = overlapHtml;
+  document.getElementById('s2-hc').textContent = `${s1Tot + s2Tot} total`;
+
+  const summary = document.getElementById('staff-summary');
+  const s3Tot = Object.values(STEADY).reduce((t,v)=>t+Math.max(1,Math.round((v.s1+v.s2)/3)),0);
+  if(summary) {
+    summary.innerHTML = `
+      <div class="summary-pill"><span class="mini-note">1st Shift (base)</span><b>${s1Tot}</b></div>
+      <div class="summary-pill"><span class="mini-note">2nd Shift (base)</span><b>${s2Tot}</b></div>
+      <div class="summary-pill"><span class="mini-note">3rd Shift (modeled)</span><b>${s3Tot}</b></div>
+      <div class="summary-pill"><span class="mini-note">Required Headcount (${base.label})</span><b>${totalSel}</b><span class="mini-note">Actual ${actual} · ${hcStatus}</span></div>`;
+  }
+  
+  const tbl = document.getElementById('staff-detail-table');
+  const entries = Object.entries(zoneStats).sort((a,b)=>b[1].units-a[1].units);
+  let h = `<thead><tr><th>Zone</th><th>UPH</th><th>Window Units</th><th>Required Headcount</th><th>Associates Assigned</th><th>Avg Start</th><th>Avg End</th></tr></thead><tbody>`;
+  entries.forEach(([z]) => {
+      const c = ZONE_COLORS[z] || '#94a3b8';
+    const uph = UPH[z]||150;
+    const units = windowZones[z]?.units || 0;
+    const calc = units > 0 ? Math.max(1, Math.ceil(units / (uph * hours))) : 0;
+    const assoc = associatesByZone[z] || [];
+    const avgStart = assoc.length ? assoc.reduce((s,a)=>s+a.start,0)/assoc.length : null;
+    const avgEnd = assoc.length ? assoc.reduce((s,a)=>s+a.end,0)/assoc.length : null;
+    const tfmt = v => v == null ? '—' : `${String(Math.floor(v)%24).padStart(2,'0')}:${String(Math.round((v%1)*60)).padStart(2,'0')}`;
+    h += `<tr>
+      <td><span class="zpill" style="background:${c}18;color:${c}"><span style="width:5px;height:5px;border-radius:50%;background:${c};display:inline-block"></span>${z}</span></td>
+      <td class="mono">${uph}</td><td class="mono">${Math.round(units).toLocaleString()}</td>
+      <td class="mono" style="color:${c};font-weight:700">${calc}</td>
+      <td class="mono">${assoc.length}</td>
+      <td class="mono">${tfmt(avgStart)}</td>
+      <td class="mono">${tfmt(avgEnd)}</td>
+    </tr>`;
+  });
+  tbl.innerHTML = h + '</tbody>';
+  
+  drawZoneFlowMap(windowZones, start, end);
+  drawTransitionLayoutMap(s1Tot, s2Tot);
+}
+
+function drawZoneFlowMap(windowZones, start, end) {
+  const canvas = document.getElementById('flow-canvas');
+  if(!canvas) return;
+  const W = canvas.width = canvas.clientWidth || 980;
+  const H = canvas.height = 340;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#040609'; ctx.fillRect(0,0,W,H);
+  const zones = Object.entries(ZONE_BOUNDS).sort((a,b)=>(windowZones[b[0]]?.units||0)-(windowZones[a[0]]?.units||0));
+  const spacing = W / (zones.length + 1);
+  const boxW = Math.min(84, spacing - 10);
+  const halfBox = boxW / 2;
+  const boxH = 52;
+  const fontSize = zones.length > 10 ? 9 : 11;
+  const subFontSize = zones.length > 10 ? 8 : 10;
+  const y = H/2;
+  zones.forEach(([z], i) => {
+    const x = spacing*(i+1);
+    const c = ZONE_COLORS[z] || '#64748b';
+    ctx.fillStyle = c + '33';
+    ctx.strokeStyle = c;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.roundRect(x-halfBox,y-26,boxW,boxH,8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#e2e8f0'; ctx.font = fontSize+'px Syne'; ctx.textAlign='center';
+    ctx.fillText(z, x, y-2);
+    ctx.fillStyle = '#94a3b8'; ctx.font = subFontSize+'px IBM Plex Mono';
+    ctx.fillText(`Start ${(Math.floor(start)%24).toString().padStart(2,'0')}:00`, x, y+12);
+    ctx.fillText(`End ${(Math.floor(end)%24).toString().padStart(2,'0')}:00`, x, y+24);
+    ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y-34, 4, 0, Math.PI*2); ctx.fill();
+    if(i < zones.length - 1) {
+      const nx = spacing*(i+2);
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(x+halfBox+3,y); ctx.lineTo(nx-halfBox-3,y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(nx-halfBox-9,y-4); ctx.lineTo(nx-halfBox-3,y); ctx.lineTo(nx-halfBox-9,y+4); ctx.fillStyle='#38bdf8'; ctx.fill();
+    }
+  });
+  ctx.fillStyle='#64748b'; ctx.font='10px IBM Plex Mono'; ctx.textAlign='left';
+  ctx.fillText('Standing positions shown as nodes; arrows indicate movement direction between zones by volume rank.', 12, H-12);
+}
+
+function drawTransitionLayoutMap(s1Tot, s2Tot) {
+  const canvas = document.getElementById('transition-canvas');
+  if(!canvas) return;
+  const W = canvas.width = canvas.clientWidth || 420;
+  const H = canvas.height = 200;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#040609'; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle = '#1e293b';
+  for(let i=0;i<6;i++) { ctx.strokeRect(20+i*65, 36, 50, 130); }
+  ctx.fillStyle='#3b82f6AA'; ctx.fillRect(24,40,180,58);
+  ctx.fillStyle='#f59e0bAA'; ctx.fillRect(210,40,180,58);
+  ctx.fillStyle='#22c55e99'; ctx.fillRect(24,106,366,56);
+  ctx.fillStyle='#bfdbfe'; ctx.font='10px IBM Plex Mono';
+  ctx.fillText(`1st Shift staging (${s1Tot})`, 32, 72);
+  ctx.fillStyle='#fde68a'; ctx.fillText(`2nd Shift staging (${s2Tot})`, 220, 72);
+  ctx.fillStyle='#86efac'; ctx.fillText(`Shared flow lane (${s1Tot+s2Tot} combined)`, 32, 138);
+}
+
+// ═══════════════════════════════════════════════
+// RAMP PLAN
+// ═══════════════════════════════════════════════
+function buildRamp() {
+  const { start, end, key } = getShiftRange('ramp', 's1');
+  const hours = (end <= start ? (end + 24 - start) : (end - start)) || 8;
+  const wz = getWindowZoneData(start, end);
+  const efficiency = {w1:0.7,w2:0.85,ws:1};
+  const order = ['ZONE 1','Paint','ZONE 2','ZONE 5','ZONE 3','Wolf gordon','Big Rack','ZONE 4','Nora','Promo','Samplize','No Location'];
+  let tot = {w1s1:0,w1s2:0,w2s1:0,w2s2:0,wss1:0,wss2:0};
+  const body = document.getElementById('ramp-body');
+  let h = '';
+  
+  order.forEach(z => {
+    const c = ZONE_COLORS[z]||'#64748b';
+     const uph = UPH[z] || 150;
+    const units = Math.round(wz[z]?.units || 0);
+    const calc = units > 0 ? Math.max(1, Math.ceil(units / (uph * hours))) : 0;
+    const split = key === 's1' ? {s1: Math.max(calc,1), s2: Math.max(0,Math.round(calc*0.7))}
+      : key === 's2' ? {s1: Math.max(0,Math.round(calc*0.8)), s2: Math.max(calc,1)}
+      : {s1: Math.max(0,Math.round(calc*0.6)), s2: Math.max(0,Math.round(calc*0.6))};
+    const wk = {
+      w1:{s1: Math.ceil(split.s1/efficiency.w1), s2: Math.ceil(split.s2/efficiency.w1)},
+      w2:{s1: Math.ceil(split.s1/efficiency.w2), s2: Math.ceil(split.s2/efficiency.w2)},
+      ws:{s1: Math.ceil(split.s1/efficiency.ws), s2: Math.ceil(split.s2/efficiency.ws)}
+    };
+    tot.w1s1 += wk.w1.s1; tot.w1s2 += wk.w1.s2;
+    tot.w2s1 += wk.w2.s1; tot.w2s2 += wk.w2.s2;
+    tot.wss1 += wk.ws.s1; tot.wss2 += wk.ws.s2;
+
+    h += `<tr>
+      <td><span class="zpill" style="background:${c}18;color:${c};font-size:11px"><span style="width:5px;height:5px;border-radius:50%;background:${c};display:inline-block"></span>${z}</span></td>
+      <td class="mono">${uph}</td>
+      <td class="mono">${units.toLocaleString()}</td>
+      <td class="mono" style="color:var(--cyan)">${split.s1}</td>
+      <td class="mono" style="color:var(--cyan)">${split.s2}</td>
+      <td class="rc" style="background:rgba(59,130,246,0.05);color:#93c5fd">${wk.w1.s1}</td>
+      <td class="rc" style="background:rgba(59,130,246,0.05);color:#64748b">${wk.w1.s2}</td>
+      <td class="rc" style="background:rgba(34,197,94,0.05);color:#86efac">${wk.w2.s1}</td>
+      <td class="rc" style="background:rgba(34,197,94,0.05);color:#64748b">${wk.w2.s2}</td>
+      <td class="rc" style="background:rgba(245,158,11,0.05);color:#fcd34d">${wk.ws.s1}</td>
+      <td class="rc" style="background:rgba(245,158,11,0.05);color:#64748b">${wk.ws.s2}</td>
+    </tr>`;
+  });
+  
+  body.innerHTML = h;
+  document.getElementById('r-w1s1').textContent = tot.w1s1;
+  document.getElementById('r-w1s2').textContent = tot.w1s2;
+  document.getElementById('r-w2s1').textContent = tot.w2s1;
+  document.getElementById('r-w2s2').textContent = tot.w2s2;
+  document.getElementById('r-wss1').textContent = tot.wss1;
+  document.getElementById('r-wss2').textContent = tot.wss2;
+   const note = document.getElementById('ramp-volume-note');
+  if(note) note.textContent = `Dynamic volume window: ${Math.floor(start)%24}:00-${Math.floor(end)%24}:00 (${hours.toFixed(1)}h)`;
+}
 
 // ═══════════════════════════════════════════════
 // UPH TARGETS TAB
@@ -5148,20 +5296,14 @@ function drawPickerHourlyChart(series, selectedHourFilter = null) {
 // ═══════════════════════════════════════════════
 // FORECAST DASHBOARD
 // ═══════════════════════════════════════════════
-let fcData = [];          // aggregated training data [{hour, day, category, zone, units, date}]
-let fcFiltered = [];      // filtered subset for display
-let fcModel = null;       // TensorFlow.js trained model
-let fcPredictions = {};   // { hour -> predictedUnits }
-let fcActuals = {};       // { hour -> actualUnits }
-let fcZonePredictions = {}; // { zone -> predictedUnits }
-let fcZoneActuals = {};   // { zone -> actualUnits }
-let fcTrainingLoss = null;
-let fcR2 = null;
+let fcData = [];          // parsed forecast rows [{time,x,y,units,userId,date,day,category,hour,zone}]
+let fcFiltered = [];      // filtered subset
+let fcGridData = [];      // aggregated 2x2 grid for heat map
 
 // Active filter state for toggle buttons
 let fcFilterCat = 'all';
 let fcFilterDay = 'all';
-let fcFilterHours = [];
+let fcFilterHours = []; // supports single-select or multi-select
 
 const FC_DAY_ORDER = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const FC_HOURS = [];
@@ -5178,356 +5320,383 @@ function sortByOpHour(a, b) {
   return opHourIndex(a) - opHourIndex(b);
 }
 
-function normalizeDropOffValue(v) {
-  if(v == null || v === '') return '';
-  return String(v).replace(/\s+/g, ' ').trim().toUpperCase();
-}
+function buildThreeHourIntervals(hours) {
+  const validHours = (hours || []).filter(h => Number.isInteger(h));
+  if(!validHours.length) return [];
 
-// ═══════════════════════════════════════════════
-// TENSORFLOW.JS FORECAST MODEL
-// ═══════════════════════════════════════════════
+  const uniq = [...new Set(validHours)].sort(sortByOpHour);
+  const startOp = opHourIndex(uniq[0]);
+  const endOp = opHourIndex(uniq[uniq.length - 1]);
+  const intervals = [];
 
-function fcPrepareTrainingData(seqLen = 4) {
-  if(!uploadedTxAll || !uploadedTxAll.length) return null;
-
-  const days = [...new Set(uploadedTxAll.map(r => r.dayOfWeek || 'Unknown').filter(Boolean))];
-  const categories = [...new Set(uploadedTxAll.map(r => r.promoType || 'Unknown').filter(Boolean))];
-  const brands = [...new Set(uploadedTxAll.map(r => r.productBrand || 'Unknown').filter(Boolean))];
-  const zones = [...new Set(uploadedTxAll.map(r => r.zone || 'No Location').filter(Boolean))];
-
-  const agg = {};
-  uploadedTxAll.forEach(r => {
-    const day = r.dayOfWeek || 'Unknown';
-    const category = r.promoType || 'Unknown';
-    const zone = r.zone || 'No Location';
-    const brand = r.productBrand || 'Unknown';
-    const key = `${r.dateValue}|${r.hour}|${day}|${category}`;
-    if(!agg[key]) {
-      agg[key] = {
-        date: r.dateValue,
-        hour: r.hour,
-        day,
-        category,
-        units: 0,
-        brandCounts: {},
-        zoneCounts: {}
-      };
-    }
-    agg[key].units += r.units;
-    agg[key].brandCounts[brand] = (agg[key].brandCounts[brand] || 0) + r.units;
-    agg[key].zoneCounts[zone] = (agg[key].zoneCounts[zone] || 0) + r.units;
-  });
-
-  const hourlyRows = Object.values(agg).map(r => {
-    const brand = Object.entries(r.brandCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Unknown';
-    const zone = Object.entries(r.zoneCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'No Location';
-    return { date: r.date, hour: r.hour, day: r.day, category: r.category, units: r.units, brand, zone };
-  });
-  if(hourlyRows.length <= seqLen) return null;
-
-  const byDateCat = {};
-  hourlyRows.forEach(r => {
-    const key = `${r.date}|${r.day}|${r.category}`;
-    if(!byDateCat[key]) byDateCat[key] = [];
-    byDateCat[key].push(r);
-  });
-
-  const samples = [];
-  Object.values(byDateCat).forEach(list => {
-    const sorted = list.slice().sort((a, b) => sortByOpHour(a.hour, b.hour));
-    for(let i = seqLen; i < sorted.length; i++) {
-      const lagUnits = [];
-      for(let l = i - seqLen; l < i; l++) lagUnits.push(sorted[l].units || 0);
-      const target = sorted[i];
-      samples.push({
-        lagUnits,
-        hour: target.hour,
-        day: target.day,
-        category: target.category,
-        units: target.units,
-        brand: target.brand,
-        zone: target.zone
-      });
-    }
-  });
-
-  return samples.length ? { samples, days, categories, brands, zones, seqLen } : null;
-}
-
-function fcOneHotEncode(value, classes) {
-  return classes.map(c => c === value ? 1 : 0);
-}
-
-function fcBuildFeatureVector(hour, day, category, days, categories) {
-  // Features: [hour_sin, hour_cos, ...day_one_hot, ...category_one_hot]
-  const hourRad = (hour / 24) * 2 * Math.PI;
-  const hourSin = Math.sin(hourRad);
-  const hourCos = Math.cos(hourRad);
-  const dayOH = fcOneHotEncode(day, days);
-  const catOH = fcOneHotEncode(category, categories);
-  return [hourSin, hourCos, ...dayOH, ...catOH];
-}
-
-async function fcTrainAndForecast() {
-  const btn = document.getElementById('fc-train-btn');
-  const statusEl = document.getElementById('fc-model-status');
-
-  if(!uploadedTxAll || !uploadedTxAll.length) {
-    statusEl.textContent = 'No data loaded — upload ops file first';
-    return;
+  for(let start = startOp; start <= endOp; start += 3) {
+    const bucketHours = [start % 24, (start + 1) % 24, (start + 2) % 24];
+    intervals.push({
+      key: `${start % 24}-${(start + 3) % 24}`,
+      startHour: start % 24,
+      endHour: (start + 3) % 24,
+      opStart: start,
+      opEnd: start + 3,
+      hours: bucketHours
+    });
   }
 
-  btn.disabled = true;
-  btn.textContent = 'Training...';
-  statusEl.textContent = 'Preparing data...';
+  return intervals;
+}
 
-  await new Promise(r => setTimeout(r, 50));
+function formatIntervalLabel(interval) {
+  if(!interval) return '';
+  const fmt = h => String(h).padStart(2, '0') + ':00';
+  return `${fmt(interval.startHour)}–${fmt(interval.endHour)}`;
+}
 
-  try {
-    const prepared = fcPrepareTrainingData(4);
-    if(!prepared) {
-      statusEl.textContent = 'Could not prepare training data';
-      btn.disabled = false;
-      btn.textContent = 'Train Model & Forecast';
-      return;
+function fcFormatHour(h) {
+  if(h === 0) return '12:00 AM';
+  if(h < 12) return h + ':00 AM';
+  if(h === 12) return '12:00 PM';
+  return (h - 12) + ':00 PM';
+}
+
+function fcParseMinuteOfDay(val) {
+  if(val == null) return NaN;
+  if(typeof val === 'number') {
+    const frac = ((val % 1) + 1) % 1;
+    const minuteOfDay = Math.floor(frac * 24 * 60);
+    if(!isNaN(minuteOfDay)) return minuteOfDay;
+  }
+
+  const s = String(val).trim().toLowerCase();
+  const m1 = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  if(m1) {
+    let h = parseInt(m1[1], 10);
+    const mins = parseInt(m1[2], 10);
+    const ampm = (m1[4] || '').toLowerCase();
+    if(ampm === 'pm' && h < 12) h += 12;
+    if(ampm === 'am' && h === 12) h = 0;
+    if(!isNaN(h) && !isNaN(mins)) return ((h % 24) * 60) + mins;
+  }
+
+  const m2 = s.match(/^(\d{1,2})\s*(am|pm)$/i);
+  if(m2) {
+    let h = parseInt(m2[1], 10);
+    const ampm = m2[2].toLowerCase();
+    if(ampm === 'pm' && h < 12) h += 12;
+    if(ampm === 'am' && h === 12) h = 0;
+    if(!isNaN(h)) return (h % 24) * 60;
+  }
+
+  const dt = new Date(s);
+  if(!isNaN(dt)) return dt.getHours() * 60 + dt.getMinutes();
+
+  const parsed = parseFloat(s);
+  if(!isNaN(parsed)) {
+    const hour = Math.floor(parsed) % 24;
+    const mins = Math.round((parsed - Math.floor(parsed)) * 60);
+    return hour * 60 + Math.max(0, mins);
+  }
+  return NaN;
+}
+
+function fcParseHour(val) {
+  const minuteOfDay = fcParseMinuteOfDay(val);
+  return isNaN(minuteOfDay) ? NaN : Math.floor(minuteOfDay / 60) % 24;
+}
+
+function fcNormalizeDay(val) {
+  if(!val) return '';
+  const s = String(val).trim().toLowerCase();
+  for(const d of FC_DAY_ORDER) {
+    if(s === d.toLowerCase() || s === d.toLowerCase().slice(0,3)) return d;
+  }
+  const dt = new Date(val);
+  if(!isNaN(dt)) {
+    return FC_DAY_ORDER[dt.getDay()] || '';
+  }
+  return String(val).trim();
+}
+
+function fcCategoryFromPicker(userId) {
+  const normalizedId = String(userId || '').trim().toLowerCase();
+  if(!normalizedId) return '';
+  if(/\b(imp|impl|implement|implements)\b/.test(normalizedId)) return 'Implement';
+  return '';
+}
+
+function fcNormalizeCategory(val, userId) {
+  const raw = String(val || '').trim();
+  if(!raw) return fcCategoryFromPicker(userId);
+
+  const normalized = raw.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if(/\b(imp|impl|implement|implements)\b/.test(normalized)) return 'Implement';
+
+  return raw.replace(/\s+/g, ' ');
+}
+
+function fcBuildZoneActiveMetrics(rows) {
+  const byUser = {};
+  rows.forEach(r => {
+    if(!r || !r.zone || isNaN(r.txMin)) return;
+    const uid = (r.userId && String(r.userId).trim()) ? String(r.userId).trim() : 'Unknown';
+    if(!byUser[uid]) byUser[uid] = [];
+    byUser[uid].push({ txMin: r.txMin, zone: r.zone, units: r.units || 0 });
+  });
+
+  const metrics = {};
+  for(const uid of Object.keys(byUser)) {
+    const sorted = byUser[uid].sort((a,b) => a.txMin - b.txMin);
+    const contrib = computeZoneRunContributions(sorted);
+    for(const [zone, vals] of Object.entries(contrib)) {
+      if(!metrics[zone]) metrics[zone] = { activeMinutes: 0, inactiveMinutes: 0, units: 0 };
+      metrics[zone].activeMinutes += vals.activeMinutes || 0;
+      metrics[zone].inactiveMinutes += vals.inactiveMinutes || 0;
+      metrics[zone].units += vals.units || 0;
     }
+  }
+  return metrics;
+}
 
-    const { samples, days, categories, brands, zones, seqLen } = prepared;
-    const covariateSize = 2 + days.length + categories.length;
+function fcGetDateKey(row) {
+  const raw = row && row.date != null ? String(row.date).trim() : '';
+  if(!raw) return '';
+  const dt = new Date(raw);
+  if(!isNaN(dt)) {
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + d;
+  }
+  return raw;
+}
 
-    const seqXs = [];
-    const covXs = [];
-    const unitsYs = [];
-    const brandYs = [];
-    const zoneYs = [];
+function fcForecastSeries(values) {
+  if(!values || values.length === 0) return 0;
+  if(values.length === 1) return values[0];
 
-    samples.forEach(s => {
-      seqXs.push(s.lagUnits.map(v => [v]));
-      covXs.push(fcBuildFeatureVector(s.hour, s.day, s.category, days, categories));
-      unitsYs.push(s.units);
-      brandYs.push(fcOneHotEncode(s.brand, brands));
-      zoneYs.push(fcOneHotEncode(s.zone, zones));
-    });
+  const n = values.length;
+  const recent = values.slice(Math.max(0, n - 5));
+  const wmaDen = recent.reduce((s, _, i) => s + (i + 1), 0);
+  const wma = recent.reduce((s, v, i) => s + v * (i + 1), 0) / Math.max(wmaDen, 1);
 
-    const maxUnits = Math.max(...unitsYs, 1);
-    const normalizedUnitsYs = unitsYs.map(y => y / maxUnits);
+  if(n < 3) return Math.max(0, wma);
 
-    statusEl.textContent = `Training on ${samples.length} sequence samples (${seqLen} lag steps)...`;
-    await new Promise(r => setTimeout(r, 50));
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for(let i = 0; i < n; i++) {
+    const x = i + 1;
+    const y = values[i];
+    sumX += x; sumY += y; sumXY += x * y; sumXX += x * x;
+  }
+  const den = n * sumXX - sumX * sumX;
+  const slope = den === 0 ? 0 : (n * sumXY - sumX * sumY) / den;
+  const intercept = (sumY - slope * sumX) / n;
+  const lr = intercept + slope * (n + 1);
 
-    // Dispose old model if exists
-    if(fcModel) { fcModel.dispose(); fcModel = null; }
+  return Math.max(0, wma * 0.65 + lr * 0.35);
+}
 
-    // Build TensorFlow.js model
-    const seqInput = tf.input({ shape: [seqLen, 1], name: 'seq_input' });
-    const covInput = tf.input({ shape: [covariateSize], name: 'cov_input' });
+function fcBuildForecastRows() {
+  const categoryRows = fcData.filter(r => fcFilterCat === 'all' || r.category === fcFilterCat);
+  const dayRows = categoryRows.filter(r => fcFilterDay === 'all' || r.day === fcFilterDay);
+  const sourceRows = dayRows.length ? dayRows : categoryRows;
+  if(sourceRows.length === 0) return [];
 
-    const seqBranch = tf.layers.lstm({ units: 32, activation: 'tanh' }).apply(seqInput);
-    const covBranch = tf.layers.dense({ units: 24, activation: 'relu' }).apply(covInput);
-    const merged = tf.layers.concatenate().apply([seqBranch, covBranch]);
-    const shared = tf.layers.dense({ units: 48, activation: 'relu' }).apply(merged);
+  const byDate = {};
+  sourceRows.forEach(r => {
+    const dk = fcGetDateKey(r);
+    if(!dk) return;
+    if(!byDate[dk]) byDate[dk] = [];
+    byDate[dk].push(r);
+  });
+  const dateKeys = Object.keys(byDate).sort();
+  if(dateKeys.length === 0) return [];
 
-    const unitsOutput = tf.layers.dense({ units: 1, activation: 'linear', name: 'units_output' }).apply(shared);
-    const brandOutput = tf.layers.dense({ units: brands.length, activation: 'softmax', name: 'brand_output' }).apply(shared);
-    const zoneOutput = tf.layers.dense({ units: zones.length, activation: 'softmax', name: 'zone_output' }).apply(shared);
+  const selectedDateRows = byDate[dateKeys[dateKeys.length - 1]];
+  const dailyTotals = [];
+  const hourSeries = {};
+  const zoneHourSeries = {};
 
-    const model = tf.model({
-      inputs: [seqInput, covInput],
-      outputs: [unitsOutput, brandOutput, zoneOutput]
-    });
-
-    model.compile({
-      optimizer: tf.train.adam(0.003),
-      loss: {
-        units_output: 'meanSquaredError',
-        brand_output: 'categoricalCrossentropy',
-        zone_output: 'categoricalCrossentropy'
-      },
-      lossWeights: {
-        units_output: 1.0,
-        brand_output: 0.5,
-        zone_output: 0.5
+  dateKeys.forEach(dk => {
+    const rows = byDate[dk];
+    let total = 0;
+    const hTotals = {};
+    const zhTotals = {};
+    rows.forEach(r => {
+      total += r.units;
+      if(!isNaN(r.hour)) {
+        hTotals[r.hour] = (hTotals[r.hour] || 0) + r.units;
+        const zhk = r.zone + '|' + r.hour;
+        zhTotals[zhk] = (zhTotals[zhk] || 0) + r.units;
       }
     });
+    dailyTotals.push(total);
 
-    const seqTensor = tf.tensor3d(seqXs);
-    const covTensor = tf.tensor2d(covXs);
-    const unitsTensor = tf.tensor2d(normalizedUnitsYs, [normalizedUnitsYs.length, 1]);
-    const brandTensor = tf.tensor2d(brandYs);
-    const zoneTensor = tf.tensor2d(zoneYs);
-
-    // Train
-    const history = await model.fit(
-      { seq_input: seqTensor, cov_input: covTensor },
-      { units_output: unitsTensor, brand_output: brandTensor, zone_output: zoneTensor },
-      {
-      epochs: 100,
-      batchSize: Math.min(64, Math.max(8, Math.floor(samples.length / 4))),
-      validationSplit: 0.15,
-      shuffle: true,
-      callbacks: {
-        onEpochEnd: (epoch, logs) => {
-          if(epoch % 20 === 0) {
-            statusEl.textContent = `Epoch ${epoch + 1}/100 — total loss: ${logs.loss.toFixed(6)}`;
-          }
-        }
-      }
+    FC_HOURS.forEach(h => {
+      if(!hourSeries[h]) hourSeries[h] = [];
+      hourSeries[h].push(hTotals[h] || 0);
     });
 
-    fcModel = model;
-    fcTrainingLoss = history.history.loss[history.history.loss.length - 1] || 0;
+    Object.keys(zhTotals).forEach(k => {
+      if(!zoneHourSeries[k]) zoneHourSeries[k] = [];
+      zoneHourSeries[k].push(zhTotals[k]);
+    });
+    Object.keys(zoneHourSeries).forEach(k => {
+      if(!(k in zhTotals)) zoneHourSeries[k].push(0);
+    });
+  });
 
-    // Store metadata for predictions
-    fcModel._fcMeta = { days, categories, brands, zones, maxUnits, covariateSize, seqLen };
+  const dailyForecast = fcForecastSeries(dailyTotals);
+  const forecastByHour = {};
+  FC_HOURS.forEach(h => {
+    const vals = hourSeries[h] || Array(dateKeys.length).fill(0);
+    forecastByHour[h] = fcForecastSeries(vals);
+  });
 
-    const predOut = model.predict({ seq_input: seqTensor, cov_input: covTensor });
-    const unitsPredTensor = Array.isArray(predOut) ? predOut[0] : predOut;
-    const predValues = (await unitsPredTensor.data()).map(v => Math.max(0, v * maxUnits));
+  const hourForecastSum = Object.values(forecastByHour).reduce((s, v) => s + v, 0);
+  if(hourForecastSum > 0 && dailyForecast > 0) {
+    const scale = dailyForecast / hourForecastSum;
+    Object.keys(forecastByHour).forEach(h => { forecastByHour[h] *= scale; });
+  }
 
-    // R² calculation
-    const meanActual = unitsYs.reduce((s, v) => s + v, 0) / unitsYs.length;
-    let ssRes = 0, ssTot = 0;
-    for(let i = 0; i < unitsYs.length; i++) {
-      ssRes += (unitsYs[i] - predValues[i]) ** 2;
-      ssTot += (unitsYs[i] - meanActual) ** 2;
+  const templateByZoneHour = {};
+  selectedDateRows.forEach(r => {
+    if(isNaN(r.hour)) return;
+    const k = r.zone + '|' + r.hour;
+    templateByZoneHour[k] = (templateByZoneHour[k] || 0) + r.units;
+  });
+
+  const rows = selectedDateRows.map(r => {
+    if(isNaN(r.hour) || !FC_HOURS.includes(r.hour)) return { ...r };
+    const zhk = r.zone + '|' + r.hour;
+    const zhSeries = zoneHourSeries[zhk] || Array(dateKeys.length).fill(0);
+    let targetZh = fcForecastSeries(zhSeries);
+    const hourTarget = forecastByHour[r.hour] || 0;
+
+    if(targetZh <= 0 && hourTarget > 0) {
+      const templateHourTotal = selectedDateRows
+        .filter(x => x.hour === r.hour)
+        .reduce((s, x) => s + x.units, 0);
+      const ratio = templateHourTotal > 0 ? (r.units / templateHourTotal) : 0;
+      targetZh = hourTarget * ratio;
     }
-    fcR2 = ssTot > 0 ? 1 - (ssRes / ssTot) : 0;
 
-    // Clean up tensors
-    if(Array.isArray(predOut)) predOut.forEach(t => t.dispose());
-    seqTensor.dispose();
-    covTensor.dispose();
-    unitsTensor.dispose();
-    brandTensor.dispose();
-    zoneTensor.dispose();
-
-    statusEl.textContent = `Model trained — R²: ${fcR2.toFixed(4)} · Loss: ${fcTrainingLoss.toFixed(6)}`;
-
-    // Build toggle buttons and populate filters
-    fcBuildToggleButtons();
-
-    // Update badge
-    const badge = document.getElementById('fc-data-badge');
-    badge.className = 'data-badge live';
-    badge.textContent = 'MODEL READY';
-    document.getElementById('fc-row-count').textContent = `${samples.length} sequence samples · ${uploadedTxAll.length} transactions`;
-
-    // Apply filters and render
-    fcApplyFiltersAndPredict();
-
-    btn.disabled = false;
-    btn.textContent = 'Train Model & Forecast';
-
-  } catch(err) {
-    console.error('[forecast] Training failed', err);
-    statusEl.textContent = 'Training failed: ' + err.message;
-    btn.disabled = false;
-    btn.textContent = 'Train Model & Forecast';
-  }
-}
-
-function fcApplyFiltersAndPredict() {
-  if(!fcModel || !fcModel._fcMeta) return;
-  const { days, categories, brands, zones, maxUnits, seqLen } = fcModel._fcMeta;
-
-  let filtered = uploadedTxAll.slice();
-  if(fcFilterCat !== 'all') filtered = filtered.filter(r => r.promoType === fcFilterCat);
-  if(fcFilterDay !== 'all') filtered = filtered.filter(r => r.dayOfWeek === fcFilterDay);
-
-  fcActuals = {};
-  FC_HOURS.forEach(h => fcActuals[h] = 0);
-  filtered.forEach(r => {
-    if(FC_HOURS.includes(r.hour)) fcActuals[r.hour] += r.units;
+    const denom = templateByZoneHour[zhk] || 0;
+    const scaledUnits = denom > 0 ? (r.units / denom) * targetZh : r.units;
+    return { ...r, units: Math.max(0, scaledUnits) };
   });
 
-  fcZoneActuals = {};
-  filtered.forEach(r => {
-    const z = r.zone || 'No Location';
-    fcZoneActuals[z] = (fcZoneActuals[z] || 0) + r.units;
-  });
-
-  const dayList = fcFilterDay !== 'all' ? [fcFilterDay] : days;
-  const catList = fcFilterCat !== 'all' ? [fcFilterCat] : categories;
-
-  fcPredictions = {};
-  FC_HOURS.forEach(h => fcPredictions[h] = 0);
-  fcZonePredictions = {};
-  const fcBrandPredictions = {};
-
-  const hourlyAgg = {};
-  uploadedTxAll.forEach(r => {
-    const key = `${r.dayOfWeek || 'Unknown'}|${r.promoType || 'Unknown'}|${r.hour}`;
-    if(!hourlyAgg[key]) hourlyAgg[key] = { units: 0, count: 0 };
-    hourlyAgg[key].units += r.units;
-    hourlyAgg[key].count += 1;
-  });
-
-  const seqXs = [];
-  const covXs = [];
-  const predMeta = [];
-  dayList.forEach(d => {
-    catList.forEach(c => {
-      FC_HOURS.forEach(h => {
-        const lagUnits = [];
-        const idx = opHourIndex(h);
-        for(let back = seqLen; back >= 1; back--) {
-          const priorOp = idx - back;
-          const priorHour = priorOp >= 24 ? priorOp - 24 : priorOp < 0 ? priorOp + 24 : priorOp;
-          const aKey = `${d}|${c}|${priorHour}`;
-          const avg = hourlyAgg[aKey] ? (hourlyAgg[aKey].units / Math.max(1, hourlyAgg[aKey].count)) : 0;
-          lagUnits.push([avg]);
-        }
-        seqXs.push(lagUnits);
-        covXs.push(fcBuildFeatureVector(h, d, c, days, categories));
-        predMeta.push({ hour: h, day: d, category: c });
-      });
-    });
-  });
-
-  if(seqXs.length > 0) {
-    const seqTensor = tf.tensor3d(seqXs);
-    const covTensor = tf.tensor2d(covXs);
-    const predOut = fcModel.predict({ seq_input: seqTensor, cov_input: covTensor });
-    const unitsPred = Array.isArray(predOut) ? predOut[0].dataSync() : predOut.dataSync();
-    const brandPred = Array.isArray(predOut) ? predOut[1].arraySync() : [];
-    const zonePred = Array.isArray(predOut) ? predOut[2].arraySync() : [];
-
-    predMeta.forEach((m, i) => {
-      const val = Math.max(0, unitsPred[i] * maxUnits);
-      fcPredictions[m.hour] = (fcPredictions[m.hour] || 0) + val;
-
-      const zDist = zonePred[i] || [];
-      zDist.forEach((p, zi) => {
-        const zone = zones[zi];
-        fcZonePredictions[zone] = (fcZonePredictions[zone] || 0) + (val * p);
-      });
-
-      const bDist = brandPred[i] || [];
-      bDist.forEach((p, bi) => {
-        const brand = brands[bi];
-        fcBrandPredictions[brand] = (fcBrandPredictions[brand] || 0) + (val * p);
-      });
-    });
-
-    if(Array.isArray(predOut)) predOut.forEach(t => t.dispose());
-    seqTensor.dispose();
-    covTensor.dispose();
-  }
-
-  zones.forEach(z => { if(fcZonePredictions[z] == null) fcZonePredictions[z] = 0; });
-
-  fcFiltered = filtered;
   if(fcFilterHours.length > 0) {
-    fcFiltered = filtered.filter(r => fcFilterHours.includes(r.hour));
+    return rows.filter(r => fcFilterHours.includes(r.hour));
+  }
+  return rows;
+}
+
+// ─── Toggle Button Filter Logic ─────────────
+function fcToggleFilter(type, value, btn) {
+  const containerId = type === 'category' ? 'fc-cat-btns' : type === 'day' ? 'fc-day-btns' : 'fc-hour-btns';
+  const container = document.getElementById(containerId);
+
+  if(type === 'hour') {
+    if(value === 'all') {
+      fcFilterHours = [];
+    } else {
+      const idx = fcFilterHours.indexOf(value);
+      if(idx >= 0) {
+        fcFilterHours.splice(idx, 1);
+      } else {
+        fcFilterHours.push(value);
+      }
+    }
+
+    const allBtn = container.querySelector('[data-hour="all"]');
+    if(allBtn) allBtn.classList.toggle('active', fcFilterHours.length === 0);
+    container.querySelectorAll('[data-hour]').forEach(b => {
+      const hv = b.getAttribute('data-hour');
+      if(hv === 'all') return;
+      b.classList.toggle('active', fcFilterHours.includes(parseInt(hv, 10)));
+    });
+  } else {
+    container.querySelectorAll('.mctl').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    if(type === 'category') fcFilterCat = value;
+    else if(type === 'day') fcFilterDay = value;
   }
 
-  fcBuildKPIs();
-  fcBuildHourlyChart();
-  fcBuildStaffingTable();
+  applyForecastFilters();
+}
+
+function fcClearAllFilters() {
+  if(fcData.length === 0) return;
+  fcSetSingleFilter('category', 'all');
+  fcSetSingleFilter('day', 'all');
+  fcFilterHours = [];
+  fcSyncHourButtons();
+  fcUpdateRefreshWindowLabel();
+  applyForecastFilters();
+}
+
+
+function fcSetSingleFilter(type, value) {
+  const containerId = type === 'category' ? 'fc-cat-btns' : 'fc-day-btns';
+  const dataAttr = type === 'category' ? 'data-category' : 'data-day';
+  const container = document.getElementById(containerId);
+  if(container) {
+    container.querySelectorAll('.mctl').forEach(b => b.classList.remove('active'));
+    let target = container.querySelector(`[${dataAttr}="${value}"]`);
+    if(!target && value === 'all') target = container.querySelector('button');
+    if(target) target.classList.add('active');
+  }
+  if(type === 'category') fcFilterCat = value;
+  else fcFilterDay = value;
+}
+
+function fcSyncHourButtons() {
+  const hourDiv = document.getElementById('fc-hour-btns');
+  if(!hourDiv) return;
+  hourDiv.querySelectorAll('[data-hour]').forEach(b => {
+    const hv = b.getAttribute('data-hour');
+    if(hv === 'all') b.classList.toggle('active', fcFilterHours.length === 0);
+    else b.classList.toggle('active', fcFilterHours.includes(parseInt(hv, 10)));
+  });
+}
+
+function fcUpdateRefreshWindowLabel() {
+  const label = document.getElementById('fc-refresh-window-label');
+  if(!label) return;
+  const dayLabel = fcFilterDay === 'all' ? 'All days' : fcFilterDay;
+  const hourLabel = fcFilterHours.length
+    ? fcFilterHours.slice().sort(sortByOpHour).map(fcFormatHour).join(' → ')
+    : 'all hours';
+  label.textContent = `Window: ${dayLabel} · ${hourLabel}`;
+}
+
+function fcRefreshToCurrentWindow() {
+  if(fcData.length === 0) return;
+
+  const now = new Date();
+  const startHour = now.getHours();
+  const targetHours = [startHour, (startHour + 1) % 24, (startHour + 2) % 24];
+  const availableDays = new Set(fcData.map(r => r.day).filter(Boolean));
+  const currentDay = FC_DAY_ORDER[now.getDay()] || 'all';
+  const endHour = (startHour + 3) % 24;
+  const wrapsMidnight = endHour <= startHour;
+
+  if(wrapsMidnight) {
+    fcSetSingleFilter('day', 'all');
+  } else if(availableDays.has(currentDay)) {
+    fcSetSingleFilter('day', currentDay);
+  } else {
+    fcSetSingleFilter('day', 'all');
+  }
+
+  fcFilterHours = targetHours;
+  fcSyncHourButtons();
+  fcUpdateRefreshWindowLabel();
+  applyForecastFilters();
 }
 
 function fcBuildToggleButtons() {
-  const cats = [...new Set(uploadedTxAll.map(r => r.promoType).filter(Boolean))].sort();
+  // Category buttons
+  const cats = [...new Set(fcData.map(r => r.category))].filter(Boolean).sort();
   const catDiv = document.getElementById('fc-cat-btns');
   catDiv.innerHTML = '<button class="mctl active" data-category="all" onclick="fcToggleFilter(\'category\',\'all\',this)">All</button>';
   cats.forEach(c => {
@@ -5539,7 +5708,8 @@ function fcBuildToggleButtons() {
     catDiv.appendChild(btn);
   });
 
-  const days = [...new Set(uploadedTxAll.map(r => r.dayOfWeek).filter(Boolean))];
+  // Day buttons
+  const days = [...new Set(fcData.map(r => r.day))].filter(Boolean);
   days.sort((a,b) => {
     const ia = FC_DAY_ORDER.indexOf(a);
     const ib = FC_DAY_ORDER.indexOf(b);
@@ -5557,8 +5727,13 @@ function fcBuildToggleButtons() {
     dayDiv.appendChild(btn);
   });
 
-  const hours = [...new Set(uploadedTxAll.map(r => r.hour))].filter(h => !isNaN(h));
-  hours.sort(sortByOpHour);
+  // Hour buttons
+  const hours = [...new Set(fcData.map(r => r.hour))].filter(h => !isNaN(h));
+  hours.sort((a,b) => {
+    const na = a < 6 ? a + 24 : a;
+    const nb = b < 6 ? b + 24 : b;
+    return na - nb;
+  });
   const hourDiv = document.getElementById('fc-hour-btns');
   hourDiv.innerHTML = '<button class="mctl active" data-hour="all" onclick="fcToggleFilter(\'hour\',\'all\',this)">All</button>';
   hours.forEach(h => {
@@ -5570,93 +5745,302 @@ function fcBuildToggleButtons() {
     hourDiv.appendChild(btn);
   });
 
+  // Reset filter state
   fcFilterCat = 'all';
   fcFilterDay = 'all';
   fcFilterHours = [];
+  fcUpdateRefreshWindowLabel();
 }
 
-function fcFormatHour(h) {
-  if(h === 0) return '12:00 AM';
-  if(h < 12) return h + ':00 AM';
-  if(h === 12) return '12:00 PM';
-  return (h - 12) + ':00 PM';
-}
+// ─── File Parsing ────────────────────────────
+function handleForecastFile(file) {
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const wb = XLSX.read(e.target.result, {type:'array', cellDates:true});
+    const sheetName = wb.SheetNames.find(s => s.toLowerCase().includes('forecast')) || wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true});
 
-// ─── Toggle Button Filter Logic ─────────────
-function fcToggleFilter(type, value, btn) {
-  const containerId = type === 'category' ? 'fc-cat-btns' : type === 'day' ? 'fc-day-btns' : 'fc-hour-btns';
-  const container = document.getElementById(containerId);
+    const cellToText = v => {
+      if(v == null) return '';
+      if(v instanceof Date) return v.toISOString();
+      if(typeof v === 'object' && v.w) return String(v.w);
+      if(typeof v === 'object' && v.v != null) return String(v.v);
+      return String(v);
+    };
+    const normalizeHeader = value => cellToText(value).trim().toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
 
-  if(type === 'hour') {
-    if(value === 'all') {
-      fcFilterHours = [];
-    } else {
-      const idx = fcFilterHours.indexOf(value);
-      if(idx >= 0) fcFilterHours.splice(idx, 1);
-      else fcFilterHours.push(value);
+    // Find header row — look for columns: Actual Start Time, X, Y, Completed Units, User ID, Date, Day, Category
+    let headerRowIdx = 0;
+    let colTime = -1, colX = -1, colY = -1, colUnits = -1, colUserId = -1, colDate = -1, colDay = -1, colCategory = -1;
+
+    for(let i = 0; i < Math.min(rows.length, 30); i++) {
+      const hdr = (rows[i] || []).map(normalizeHeader);
+
+      const timeIdx = hdr.findIndex(h => h.includes('actual start') || h.includes('start time') || h.includes('time'));
+      const xIdx = hdr.findIndex(h => h === 'x' || h === 'x coordinate' || h === 'x coord');
+      const yIdx = hdr.findIndex(h => h === 'y' || h === 'y coordinate' || h === 'y coord');
+      const unitsIdx = hdr.findIndex(h => h.includes('completed') || h.includes('units') || h.includes('volume') || h.includes('qty'));
+      const userIdx = hdr.findIndex(h => h.includes('user') || h.includes('picker') || h.includes('associate'));
+      const dateIdx = hdr.findIndex(h => h === 'date' || h.includes('date'));
+      const dayIdx = hdr.findIndex((h, idx) => (h === 'day' || h === 'weekday' || h === 'day of week') && idx !== dateIdx);
+      const catIdx = hdr.findIndex(h => h === 'category' || h === 'cat' || h === 'type' || /\bcategory\b/.test(h));
+
+      // Need at least X, Y, and Units to be valid
+      if(xIdx >= 0 && yIdx >= 0 && unitsIdx >= 0) {
+        headerRowIdx = i;
+        colTime = timeIdx;
+        colX = xIdx;
+        colY = yIdx;
+        colUnits = unitsIdx;
+        colUserId = userIdx;
+        colDate = dateIdx;
+        colDay = dayIdx;
+        colCategory = catIdx;
+        break;
+      }
     }
-    const allBtn = container.querySelector('[data-hour="all"]');
-    if(allBtn) allBtn.classList.toggle('active', fcFilterHours.length === 0);
-    container.querySelectorAll('[data-hour]').forEach(b => {
-      const hv = b.getAttribute('data-hour');
-      if(hv === 'all') return;
-      b.classList.toggle('active', fcFilterHours.includes(parseInt(hv, 10)));
-    });
-  } else {
-    container.querySelectorAll('.mctl').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    if(type === 'category') fcFilterCat = value;
-    else if(type === 'day') fcFilterDay = value;
-  }
 
-  if(fcModel) fcApplyFiltersAndPredict();
+    const parsed = [];
+    for(let i = headerRowIdx + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const x = parseFloat(r[colX]);
+      const y = parseFloat(r[colY]);
+      const units = parseFloat(r[colUnits]) || 0;
+      if(isNaN(x) || isNaN(y) || units === 0) continue;
+
+      const txMin = colTime >= 0 ? fcParseMinuteOfDay(r[colTime]) : NaN;
+      const hour = colTime >= 0 ? fcParseHour(r[colTime]) : NaN;
+      const userId = colUserId >= 0 ? String(r[colUserId] || '').trim() : '';
+      const date = colDate >= 0 ? cellToText(r[colDate]) : '';
+      const day = colDay >= 0 ? fcNormalizeDay(r[colDay]) : (colDate >= 0 ? fcNormalizeDay(r[colDate]) : '');
+      const category = colCategory >= 0 ? fcNormalizeCategory(cellToText(r[colCategory]), userId) : (fcCategoryFromPicker(userId) || 'All');
+      const zone = nearestZone(x, y);
+
+      parsed.push({ time: colTime >= 0 ? r[colTime] : null, txMin, x, y, units, userId, date, day, category, hour, zone });
+    }
+
+    fcData = parsed;
+    document.getElementById('fc-row-count').textContent = parsed.length.toLocaleString() + ' forecast rows loaded';
+
+    const badge = document.getElementById('fc-data-badge');
+    badge.className = 'data-badge live';
+    badge.textContent = 'LIVE · ' + file.name;
+
+    // Build toggle buttons from data
+    fcBuildToggleButtons();
+    applyForecastFilters();
+  };
+  reader.readAsArrayBuffer(file);
 }
 
-function fcClearAllFilters() {
-  fcFilterCat = 'all';
-  fcFilterDay = 'all';
-  fcFilterHours = [];
-  // Reset UI
-  ['fc-cat-btns','fc-day-btns','fc-hour-btns'].forEach(id => {
-    const container = document.getElementById(id);
-    if(!container) return;
-    container.querySelectorAll('.mctl').forEach(b => b.classList.remove('active'));
-    const first = container.querySelector('button');
-    if(first) first.classList.add('active');
-  });
-  if(fcModel) fcApplyFiltersAndPredict();
+// ─── Filter & Render ─────────────────────────
+function applyForecastFilters() {
+  if(fcData.length === 0) return;
+
+  fcFiltered = fcBuildForecastRows();
+
+  // Build grid data from X/Y coordinates (same approach as main heatmap)
+  const RES = 2;
+  const gm = {};
+  for(const r of fcFiltered) {
+    const gx = Math.round(r.x / RES) * RES;
+    const gy = Math.round(r.y / RES) * RES;
+    const key = gx + '_' + gy + '_' + r.zone;
+    if(!gm[key]) gm[key] = {gx, gy, zone: r.zone, units: 0};
+    gm[key].units += r.units;
+  }
+  fcGridData = Object.values(gm);
+
+  fcBuildKPIs();
+  fcDrawZoneMap();
+  fcDrawHeatMap();
+  fcBuildStaffingTable();
+  fcBuildHourlyChart();
 }
 
 // ─── KPIs ────────────────────────────────────
 function fcBuildKPIs() {
-  const totalForecast = Object.values(fcPredictions).reduce((s, v) => s + v, 0);
-  const totalActual = Object.values(fcActuals).reduce((s, v) => s + v, 0);
-
-  // If hour filter, only show those hours
-  let dispForecast = totalForecast;
-  let dispActual = totalActual;
-  if(fcFilterHours.length > 0) {
-    dispForecast = fcFilterHours.reduce((s, h) => s + (fcPredictions[h] || 0), 0);
-    dispActual = fcFilterHours.reduce((s, h) => s + (fcActuals[h] || 0), 0);
-  }
-
-  document.getElementById('fc-kpi-volume').textContent = Math.round(dispForecast).toLocaleString();
-  document.getElementById('fc-kpi-zones').textContent = Math.round(dispActual).toLocaleString();
-  document.getElementById('fc-kpi-pickers').textContent = fcR2 != null ? fcR2.toFixed(4) : '—';
-  document.getElementById('fc-kpi-active-hours').textContent = fcTrainingLoss != null ? fcTrainingLoss.toFixed(6) : '—';
-
-  // Peak hour
-  let peakHour = null, peakVol = 0;
-  FC_HOURS.forEach(h => {
-    if((fcPredictions[h] || 0) > peakVol) { peakVol = fcPredictions[h]; peakHour = h; }
+  const zoneVolumes = {};
+  const allUsers = new Set();
+  let totalVol = 0;
+  fcFiltered.forEach(r => {
+    zoneVolumes[r.zone] = (zoneVolumes[r.zone] || 0) + r.units;
+    totalVol += r.units;
+    if(r.userId) allUsers.add(r.userId);
   });
-  document.getElementById('fc-kpi-peak').textContent = peakHour != null ? fcFormatHour(peakHour) : '—';
-  document.getElementById('fc-kpi-peak-sub').textContent = peakVol > 0 ? Math.round(peakVol).toLocaleString() + ' predicted units' : '';
+
+  const activeZones = Object.keys(zoneVolumes).filter(z => zoneVolumes[z] > 0).length;
+  const peakZone = Object.entries(zoneVolumes).sort((a,b) => b[1] - a[1])[0];
+  const zoneMetrics = fcBuildZoneActiveMetrics(fcFiltered);
+  const totalActiveMins = Object.values(zoneMetrics).reduce((sum, z) => sum + (z.activeMinutes || 0), 0);
+  const totalInactiveMins = Object.values(zoneMetrics).reduce((sum, z) => sum + (z.inactiveMinutes || 0), 0);
+
+  document.getElementById('fc-kpi-volume').textContent = Math.round(totalVol).toLocaleString();
+  document.getElementById('fc-kpi-zones').textContent = activeZones;
+  document.getElementById('fc-kpi-pickers').textContent = allUsers.size;
+  document.getElementById('fc-kpi-peak').textContent = peakZone ? peakZone[0] : '—';
+  document.getElementById('fc-kpi-peak-sub').textContent = peakZone ? Math.round(peakZone[1]).toLocaleString() + ' units' : '';
+  document.getElementById('fc-kpi-active-hours').textContent = (totalActiveMins / 60).toFixed(2) + 'h';
+  document.getElementById('fc-kpi-active-hours-sub').textContent = totalInactiveMins > 0
+    ? 'idle excluded: ' + (totalInactiveMins / 60).toFixed(2) + 'h'
+    : 'idle excluded: 0.00h';
 
   const parts = [];
   if(fcFilterCat !== 'all') parts.push(fcFilterCat);
   if(fcFilterDay !== 'all') parts.push(fcFilterDay);
+  if(fcFilterHours.length > 0) {
+    const sorted = fcFilterHours.slice().sort(sortByOpHour);
+    parts.push(sorted.map(fcFormatHour).join(', '));
+  }
   document.getElementById('fc-kpi-volume-sub').textContent = parts.length ? parts.join(' · ') : 'all data';
+  fcUpdateRefreshWindowLabel();
+}
+
+// ─── Zone Map (Overview style) ───────────────
+function fcDrawZoneMap() {
+  const canvas = document.getElementById('fc-zone-canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.parentElement.clientWidth - 40;
+  const H = Math.round(W * 0.42);
+  canvas.width = W; canvas.height = H;
+  ctx.clearRect(0, 0, W, H);
+
+  // Aggregate volumes by zone from filtered data
+  const zoneVolumes = {};
+  fcFiltered.forEach(r => { zoneVolumes[r.zone] = (zoneVolumes[r.zone] || 0) + r.units; });
+  const maxVol = Math.max(...Object.values(zoneVolumes), 1);
+
+  // Coordinate transform
+  const allBounds = Object.values(ZONE_BOUNDS);
+  const globalXMin = Math.min(...allBounds.map(b => b.xMin));
+  const globalXMax = Math.max(...allBounds.map(b => b.xMax));
+  const globalYMin = Math.min(...allBounds.map(b => b.yMin));
+  const globalYMax = Math.max(...allBounds.map(b => b.yMax));
+  const pad = 30;
+  const scaleX = (W - 2 * pad) / (globalXMax - globalXMin);
+  const scaleY = (H - 2 * pad) / (globalYMax - globalYMin);
+  const scale = Math.min(scaleX, scaleY);
+  const offsetX = pad + ((W - 2 * pad) - (globalXMax - globalXMin) * scale) / 2;
+  const offsetY = pad + ((H - 2 * pad) - (globalYMax - globalYMin) * scale) / 2;
+  const tc = (x, y) => [offsetX + (x - globalXMin) * scale, offsetY + (globalYMax - y) * scale];
+
+  ctx.fillStyle = '#060a12';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw zone rectangles with fill intensity
+  Object.entries(ZONE_BOUNDS).forEach(([z, b]) => {
+    const [x1, y1] = tc(b.xMin, b.yMax);
+    const [x2, y2] = tc(b.xMax, b.yMin);
+    const vol = zoneVolumes[z] || 0;
+    const intensity = vol / maxVol;
+    const c = ZONE_COLORS[z] || '#64748b';
+
+    const alpha = Math.max(0.08, intensity * 0.7);
+    ctx.fillStyle = c + Math.round(alpha * 255).toString(16).padStart(2, '0');
+    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+
+    ctx.strokeStyle = vol > 0 ? c + 'aa' : c + '30';
+    ctx.lineWidth = vol > 0 ? 1.5 : 0.5;
+    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+    const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+    ctx.fillStyle = c;
+    ctx.font = 'bold 10px Syne';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(z, cx, cy - 8);
+
+    if(vol > 0) {
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = 'bold 14px IBM Plex Mono';
+      ctx.fillText(Math.round(vol).toLocaleString(), cx, cy + 8);
+    } else {
+      ctx.fillStyle = '#475569';
+      ctx.font = '10px IBM Plex Mono';
+      ctx.fillText('0', cx, cy + 8);
+    }
+  });
+
+  // Legend
+  const legendEl = document.getElementById('fc-zone-legend');
+  legendEl.innerHTML = '';
+  Object.entries(zoneVolumes).sort((a,b) => b[1] - a[1]).forEach(([z, v]) => {
+    if(v <= 0) return;
+    const c = ZONE_COLORS[z] || '#64748b';
+    const item = document.createElement('div');
+    item.className = 'leg-item';
+    item.innerHTML = '<div class="leg-sq" style="background:' + c + '"></div>' + z + ': ' + Math.round(v).toLocaleString();
+    legendEl.appendChild(item);
+  });
+}
+
+// ─── Heat Intensity Map (X/Y coordinate-based) ───
+function fcDrawHeatMap() {
+  const canvas = document.getElementById('fc-heat-canvas');
+  const parent = canvas.parentElement;
+  canvas.width = parent.offsetWidth - 40;
+  canvas.height = Math.round(canvas.width * 0.3);
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#040609';
+  ctx.fillRect(0, 0, W, H);
+
+  const data = fcGridData;
+  if(!data.length) return;
+
+  // Use same coordinate system as the main intensity heatmap
+  const xMin = 3, xMax = 298, yMin = 1, yMax = 87;
+  const padH = 16, tw = W - padH * 2, th = H - padH * 2;
+  function tc(x, y) { return [padH + (x - xMin) / (xMax - xMin) * tw, padH + (1 - (y - yMin) / (yMax - yMin)) * th]; }
+
+  const maxU = Math.max(...data.map(d => d.units), 1);
+
+  // Zone boundaries as faint outlines
+  Object.entries(ZONE_BOUNDS).forEach(([z, b]) => {
+    const [x1, y1] = tc(b.xMin, b.yMax);
+    const [x2, y2] = tc(b.xMax, b.yMin);
+    ctx.strokeStyle = (ZONE_COLORS[z] || '#333') + '30';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+  });
+
+  // Heat color function (same as main heatmap)
+  function heatColor(v, max) {
+    const t = Math.pow(v / max, 0.45);
+    const stops = [[10,15,35],[20,50,150],[37,99,235],[245,158,11],[239,68,68],[127,20,20]];
+    const si = Math.min(Math.floor(t * (stops.length - 1)), stops.length - 2);
+    const sf = t * (stops.length - 1) - si;
+    const a = stops[si], b2 = stops[si + 1];
+    const r = Math.round(a[0] + (b2[0] - a[0]) * sf);
+    const g = Math.round(a[1] + (b2[1] - a[1]) * sf);
+    const b3 = Math.round(a[2] + (b2[2] - a[2]) * sf);
+    return 'rgba(' + r + ',' + g + ',' + b3 + ',' + (0.25 + t * 0.75) + ')';
+  }
+
+  // Draw heat cells from grid data
+  data.forEach(d => {
+    const [cx, cy] = tc(d.gx, d.gy);
+    const t = Math.pow(d.units / maxU, 0.35);
+    const size = Math.max(3, 18 * t);
+    ctx.fillStyle = heatColor(d.units, maxU);
+    ctx.fillRect(cx - size / 2, cy - size / 2, size, size);
+  });
+
+  // Zone labels
+  Object.entries(ZONE_BOUNDS).forEach(([z, b]) => {
+    const [cx, cy] = tc(b.xMean, b.yMean);
+    const c = ZONE_COLORS[z] || '#64748b';
+    ctx.font = 'bold 8px Syne';
+    const tw2 = ctx.measureText(z).width;
+    ctx.fillStyle = 'rgba(4,6,9,0.85)';
+    ctx.fillRect(cx - tw2 / 2 - 3, cy - 6, tw2 + 6, 12);
+    ctx.fillStyle = c;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(z, cx, cy);
+  });
 }
 
 // ─── Staffing Table ──────────────────────────
@@ -5664,49 +6048,72 @@ function fcBuildStaffingTable() {
   const tbody = document.getElementById('fc-staffing-body');
   tbody.innerHTML = '';
 
-  const totalPredicted = Object.values(fcZonePredictions).reduce((s, v) => s + v, 0);
-  const totalActual = Object.values(fcZoneActuals).reduce((s, v) => s + v, 0);
-  const maxVol = Math.max(...Object.values(fcZonePredictions), 1);
+  const zoneVolumes = {};
+  fcFiltered.forEach(r => {
+    zoneVolumes[r.zone] = (zoneVolumes[r.zone] || 0) + r.units;
+  });
 
-  const selectedHoursCount = fcFilterHours.length || 8; // default 8h shift
+  const totalVol = Object.values(zoneVolumes).reduce((s, v) => s + v, 0);
+  const maxVol = Math.max(...Object.values(zoneVolumes), 1);
   let totalPick = 0;
+  let totalRequiredHours = 0;
 
-  const allZones = Array.from(new Set([...Object.keys(UPH), ...Object.keys(fcZonePredictions), ...Object.keys(fcZoneActuals)]));
+  const selectedHoursCount = fcFilterHours.length;
+  let effectiveHoursFilter = selectedHoursCount;
+  if(effectiveHoursFilter === 0) {
+    const availableHours = [...new Set(fcFiltered.map(r => r.hour).filter(h => Number.isInteger(h)))].sort(sortByOpHour);
+    if(availableHours.length) {
+      const firstOp = opHourIndex(availableHours[0]);
+      const lastOp = opHourIndex(availableHours[availableHours.length - 1]);
+      effectiveHoursFilter = Math.max(1, (lastOp - firstOp) + 1);
+    } else {
+      effectiveHoursFilter = 1;
+    }
+  }
+
+  const allZones = Array.from(new Set([...Object.keys(UPH), ...Object.keys(zoneVolumes)]));
   const sorted = allZones
-    .map(zone => [zone, fcZonePredictions[zone] || 0, fcZoneActuals[zone] || 0])
+    .map(zone => [zone, zoneVolumes[zone] || 0])
     .sort((a, b) => b[1] - a[1]);
+  const zonesWithVolume = sorted.filter(([, vol]) => vol > 0).map(([zone]) => zone);
 
-  sorted.forEach(([zone, pred, actual]) => {
+  sorted.forEach(([zone, vol]) => {
     const c = ZONE_COLORS[zone] || '#64748b';
-    const share = totalPredicted > 0 ? ((pred / totalPredicted) * 100).toFixed(1) : '0.0';
+    const share = totalVol > 0 ? ((vol / totalVol) * 100).toFixed(1) : '0.0';
     const uph = UPH[zone] || 150;
-    const pickersRequired = pred > 0 ? Math.max(1, Math.ceil(pred / (uph * selectedHoursCount))) : 0;
+    const requiredHours = vol > 0 ? (vol / uph) : 0;
+    const pickersRequired = vol > 0 ? Math.max(1, Math.ceil(requiredHours / effectiveHoursFilter)) : 0;
     totalPick += pickersRequired;
-    const barPct = (pred / maxVol * 100).toFixed(1);
+    const barPct = (vol / maxVol * 100).toFixed(1);
+    totalRequiredHours += requiredHours;
+    const recommendedZone = vol > 0
+      ? '—'
+      : (zonesWithVolume.find(z => z !== zone) || zonesWithVolume[0] || '—');
 
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td><span class="zpill" style="background:' + c + '18;color:' + c + ';border:1px solid ' + c + '40"><span class="leg-sq" style="background:' + c + '"></span> ' + zone + '</span></td>' +
-      '<td class="mono">' + Math.round(actual).toLocaleString() + '</td>' +
-      '<td class="mono">' + Math.round(pred).toLocaleString() + '</td>' +
+      '<td class="mono">' + Math.round(vol).toLocaleString() + '</td>' +
       '<td class="mono" style="text-align:center;">' + share + '%</td>' +
       '<td class="mono" style="text-align:center;">' + uph + '</td>' +
       '<td class="mono" style="text-align:center;font-size:16px;font-weight:700;color:' + c + '">' + pickersRequired + '</td>' +
+      '<td class="mono" style="text-align:center;">' + (requiredHours > 0 ? requiredHours.toFixed(2) + 'h' : '0.00h') + '</td>' +
+      '<td class="mono" style="text-align:center;color:' + (recommendedZone === '—' ? '#64748b' : '#22c55e') + ';font-weight:700;">' + recommendedZone + '</td>' +
       '<td><div class="bar-bg"><div class="bar-fg" style="width:' + barPct + '%;background:' + c + '"></div></div></td>';
     tbody.appendChild(tr);
   });
 
-  document.getElementById('fc-staff-total-actual').textContent = Math.round(totalActual).toLocaleString();
-  document.getElementById('fc-staff-total-vol').textContent = Math.round(totalPredicted).toLocaleString();
+  document.getElementById('fc-staff-total-vol').textContent = Math.round(totalVol).toLocaleString();
   document.getElementById('fc-staff-total-pickers').textContent = totalPick;
+  document.getElementById('fc-staff-total-required-hours').textContent = totalRequiredHours.toFixed(2) + 'h';
 }
 
-// ─── Hourly Volume Chart (Actual vs Forecast) ─────────────────────
+// ─── Hourly Volume Chart ─────────────────────
 function fcBuildHourlyChart() {
   const canvas = document.getElementById('fc-hourly-canvas');
   const ctx = canvas.getContext('2d');
   const W = canvas.parentElement.clientWidth - 40;
-  const H = 220;
+  const H = 180;
   canvas.width = W; canvas.height = H;
   ctx.clearRect(0, 0, W, H);
 
@@ -5715,8 +6122,19 @@ function fcBuildHourlyChart() {
   if(fcFilterDay !== 'all') labelParts.push(fcFilterDay);
   document.getElementById('fc-hourly-label').textContent = labelParts.length ? labelParts.join(' · ') : 'All Data';
 
-  const maxV = Math.max(...FC_HOURS.map(h => Math.max(fcActuals[h] || 0, fcPredictions[h] || 0)), 1);
-  const padL = 50, padR = 20, padT = 30, padB = 30;
+  // Aggregate hourly (ignoring hour filter to show full profile)
+  const subset = fcBuildForecastRows();
+
+  const hourlyVol = {};
+  FC_HOURS.forEach(h => hourlyVol[h] = 0);
+  subset.forEach(r => {
+    if(!isNaN(r.hour) && FC_HOURS.includes(r.hour)) {
+      hourlyVol[r.hour] += r.units;
+    }
+  });
+
+  const maxV = Math.max(...Object.values(hourlyVol), 1);
+  const padL = 50, padR = 20, padT = 20, padB = 25;
   const chartW = W - padL - padR;
   const chartH = H - padT - padB;
   const barW = chartW / FC_HOURS.length;
@@ -5733,71 +6151,51 @@ function fcBuildHourlyChart() {
     ctx.fillText(Math.round(maxV * (1 - i / 4)).toLocaleString(), padL - 6, y + 3);
   }
 
-  // Legend
-  ctx.fillStyle = 'rgba(6,182,212,0.6)';
-  ctx.fillRect(padL, 6, 12, 10);
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '10px IBM Plex Mono';
-  ctx.textAlign = 'left';
-  ctx.fillText('Actual', padL + 16, 15);
-  ctx.fillStyle = 'rgba(59,130,246,0.6)';
-  ctx.fillRect(padL + 80, 6, 12, 10);
-  ctx.fillStyle = '#94a3b8';
-  ctx.fillText('Forecast', padL + 96, 15);
+  const selectedHrs = fcFilterHours.slice();
 
   FC_HOURS.forEach((h, idx) => {
-    const actual = fcActuals[h] || 0;
-    const pred = fcPredictions[h] || 0;
-    const halfW = (barW - 4) / 2;
+    const vol = hourlyVol[h] || 0;
+    const barH = (vol / maxV) * chartH;
     const x = padL + idx * barW;
+    const y = padT + chartH - barH;
 
-    // Actual bar (left)
-    const actBarH = (actual / maxV) * chartH;
-    ctx.fillStyle = 'rgba(6,182,212,0.6)';
-    ctx.fillRect(x + 1, padT + chartH - actBarH, halfW, actBarH);
+    const isSelected = selectedHrs.includes(h);
+    ctx.fillStyle = isSelected ? '#3b82f6' : (vol > 0 ? 'rgba(6,182,212,0.5)' : 'rgba(71,85,105,0.2)');
+    ctx.fillRect(x + 1, y, barW - 2, barH);
 
-    // Predicted bar (right)
-    const predBarH = (pred / maxV) * chartH;
-    ctx.fillStyle = 'rgba(59,130,246,0.6)';
-    ctx.fillRect(x + 1 + halfW + 1, padT + chartH - predBarH, halfW, predBarH);
-
-    // Highlight selected hours
-    if(fcFilterHours.includes(h)) {
-      ctx.strokeStyle = '#f59e0b';
+    if(isSelected) {
+      ctx.strokeStyle = '#3b82f6';
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(x, padT, barW, chartH);
+      ctx.strokeRect(x + 1, y, barW - 2, barH);
     }
 
-    // Hour label
-    ctx.fillStyle = '#475569';
+    ctx.fillStyle = isSelected ? '#3b82f6' : '#475569';
     ctx.font = '8px IBM Plex Mono';
     ctx.textAlign = 'center';
     const label = h === 0 ? '12a' : h < 12 ? h + 'a' : h === 12 ? '12p' : (h - 12) + 'p';
-    ctx.fillText(label, x + barW / 2, H - 10);
+    ctx.fillText(label, x + barW / 2, H - 8);
 
-    // Value on top
-    const topVal = Math.max(actual, pred);
-    if(topVal > 0) {
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '8px IBM Plex Mono';
-      ctx.fillText(Math.round(pred).toString(), x + barW / 2, padT + chartH - Math.max(actBarH, predBarH) - 4);
+    if(vol > 0 && barH > 14) {
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = 'bold 9px IBM Plex Mono';
+      ctx.fillText(Math.round(vol).toLocaleString(), x + barW / 2, y - 4);
     }
   });
 }
 
-// ═══════════════════════════════════════════════
-// DROP OFF LOCATION CATEGORIZATION
-// ═══════════════════════════════════════════════
-const MB_LOCATIONS = new Set(['vlm-1','express','express2','express3','express1','cons01','pack','exceptionlocation'].map(s => s.toLowerCase()));
-const FUL_LOCATIONS = new Set(['fuldrop1','dspack','dspack1','dspack2','dspack3','wgful','carpetfulpack','dsconsol'].map(s => s.toLowerCase()));
-
-function classifyDropOffLocation(loc) {
-  if(!loc) return 'Unknown';
-  const key = normalizeDropOffValue(loc).toLowerCase();
-  if(MB_LOCATIONS.has(key)) return 'Material Bank';
-  if(FUL_LOCATIONS.has(key)) return 'Fulfillment';
-  return 'Unknown';
-}
+// Drag and drop support for forecast zone
+(function() {
+  const zone = document.getElementById('fc-drop-zone');
+  if(!zone) return;
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragging'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('dragging');
+    const f = e.dataTransfer.files[0];
+    if(f) handleForecastFile(f);
+  });
+})();
 
 // ═══════════════════════════════════════════════
 // ORDERS BY CATEGORY DASHBOARD
@@ -5854,13 +6252,23 @@ function lookupProductCategory(brandName) {
   return 'Other';
 }
 
-function gatherOrderData(filterType) {
-  if(!txData.length) return null;
-  const rowsWithOrders = txData.filter(r => r.orderNumber && r.orderNumber.length > 0);
-  if(!rowsWithOrders.length) return null;
+function buildOrdersMix() {
+  if(!txData.length) return;
 
-  // Group by order number
-  const orderMap = {};
+  // Gather order data — group by order number
+  const orderMap = {};  // orderNumber -> { category, brand, units, lines, hour, pickers }
+  const rowsWithOrders = txData.filter(r => r.orderNumber && r.orderNumber.length > 0);
+
+  if(!rowsWithOrders.length) {
+    document.getElementById('om-kpi-orders').textContent = '—';
+    document.getElementById('om-kpi-units').textContent = '—';
+    document.getElementById('om-kpi-upo').textContent = '—';
+    document.getElementById('om-kpi-cats').textContent = '—';
+    document.getElementById('om-kpi-brands').textContent = '—';
+    document.getElementById('om-kpi-orders-sub').textContent = 'no order data — ensure Column I has Order Numbers';
+    return;
+  }
+
   for(const r of rowsWithOrders) {
     const oKey = r.orderNumber;
     const brand = r.productBrand || 'Unknown';
@@ -5874,37 +6282,25 @@ function gatherOrderData(filterType) {
         lines: 0,
         hour: r.hour,
         minute: r.minute,
-        pickers: new Set(),
-        dropOffLocation: r.dropOffLocation || '',
-        orderType: classifyDropOffLocation(r.dropOffLocation)
+        pickers: new Set()
       };
     }
     orderMap[oKey].units += r.units;
     orderMap[oKey].lines += 1;
     orderMap[oKey].pickers.add(r.userId);
-    if(!orderMap[oKey].dropOffLocation && r.dropOffLocation) {
-      orderMap[oKey].dropOffLocation = r.dropOffLocation;
-      orderMap[oKey].orderType = classifyDropOffLocation(r.dropOffLocation);
-    }
     const txMin = r.hour * 60 + (r.minute || 0);
     const curMin = orderMap[oKey].hour * 60 + (orderMap[oKey].minute || 0);
     if(txMin < curMin) { orderMap[oKey].hour = r.hour; orderMap[oKey].minute = r.minute; }
   }
 
-  // Filter by type
-  const allOrders = Object.entries(orderMap);
-  const filtered = filterType === 'all' ? allOrders : allOrders.filter(([,o]) => o.orderType === filterType);
-  return { orders: filtered, rowsWithOrders };
-}
-
-function renderOrderView(prefix, orders, rowsWithOrders, showNonTCW) {
+  const orders = Object.entries(orderMap);
   const totalOrders = orders.length;
   const totalUnits = orders.reduce((s, [,o]) => s + o.units, 0);
   const productCategories = [...new Set(orders.map(([,o]) => o.productCategory))].sort();
   const brands = [...new Set(orders.map(([,o]) => o.brand))].filter(b => b !== 'Unknown').sort();
 
   // Update date label
-  const dateLabel = document.getElementById(prefix + '-date-label');
+  const dateLabel = document.getElementById('om-date-label');
   if(dateLabel) {
     const dateVal = selectedOpsDate || (txData[0] && txData[0].dateValue) || '';
     const dayVal = rowsWithOrders[0]?.dayOfWeek || '';
@@ -5912,30 +6308,15 @@ function renderOrderView(prefix, orders, rowsWithOrders, showNonTCW) {
   }
 
   // KPIs
-  document.getElementById(prefix + '-kpi-orders').textContent = totalOrders.toLocaleString();
-  document.getElementById(prefix + '-kpi-units').textContent = totalUnits.toLocaleString();
-  document.getElementById(prefix + '-kpi-upo').textContent = totalOrders > 0 ? (totalUnits / totalOrders).toFixed(2) : '—';
-  document.getElementById(prefix + '-kpi-cats').textContent = productCategories.length;
-  document.getElementById(prefix + '-kpi-brands').textContent = brands.length;
-  document.getElementById(prefix + '-kpi-orders-sub').textContent = 'unique order numbers';
-  document.getElementById(prefix + '-kpi-units-sub').textContent = 'across all orders';
+  document.getElementById('om-kpi-orders').textContent = totalOrders.toLocaleString();
+  document.getElementById('om-kpi-units').textContent = totalUnits.toLocaleString();
+  document.getElementById('om-kpi-upo').textContent = totalOrders > 0 ? (totalUnits / totalOrders).toFixed(2) : '—';
+  document.getElementById('om-kpi-cats').textContent = productCategories.length;
+  document.getElementById('om-kpi-brands').textContent = brands.length;
+  document.getElementById('om-kpi-orders-sub').textContent = 'unique order numbers';
+  document.getElementById('om-kpi-units-sub').textContent = 'across all orders';
 
-  // Non-Tile/Carpet/Wolf Gordon count (Material Bank only)
-  if(showNonTCW) {
-    const EXCLUDED_CATS = new Set(['Tile']);
-    const EXCLUDED_BRAND_KEYWORDS = ['carpet', 'wolf gordon', 'wolf-gordon'];
-    const nonTCWCount = orders.filter(([,o]) => {
-      const cat = (o.productCategory || '').toLowerCase();
-      const brand = (o.brand || '').toLowerCase();
-      if(EXCLUDED_CATS.has(o.productCategory)) return false;
-      if(EXCLUDED_BRAND_KEYWORDS.some(kw => brand.includes(kw) || cat.includes(kw))) return false;
-      return true;
-    }).length;
-    const el = document.getElementById(prefix + '-kpi-nontcw');
-    if(el) el.textContent = nonTCWCount.toLocaleString();
-  }
-
-  // Product Category Breakdown
+  // ── Product Category Breakdown ──
   const catStats = {};
   for(const [, o] of orders) {
     const cat = o.productCategory;
@@ -5945,7 +6326,7 @@ function renderOrderView(prefix, orders, rowsWithOrders, showNonTCW) {
   }
 
   const catEntries = Object.entries(catStats).sort((a,b) => b[1].orders - a[1].orders);
-  const catBody = document.getElementById(prefix + '-cat-body');
+  const catBody = document.getElementById('om-cat-body');
   catBody.innerHTML = '';
 
   catEntries.forEach(([cat, st], idx) => {
@@ -5967,17 +6348,17 @@ function renderOrderView(prefix, orders, rowsWithOrders, showNonTCW) {
     catBody.appendChild(tr);
   });
 
-  document.getElementById(prefix + '-cat-total-orders').textContent = totalOrders.toLocaleString();
-  document.getElementById(prefix + '-cat-total-units').textContent = totalUnits.toLocaleString();
-  document.getElementById(prefix + '-cat-total-upo').textContent = totalOrders > 0 ? (totalUnits / totalOrders).toFixed(2) : '—';
+  document.getElementById('om-cat-total-orders').textContent = totalOrders.toLocaleString();
+  document.getElementById('om-cat-total-units').textContent = totalUnits.toLocaleString();
+  document.getElementById('om-cat-total-upo').textContent = totalOrders > 0 ? (totalUnits / totalOrders).toFixed(2) : '—';
 
-  // Donut Chart
-  drawOrdersDonut(catEntries, totalOrders, prefix + '-donut-canvas');
+  // ── Donut Chart ──
+  drawOrdersDonut(catEntries, totalOrders);
 
-  // Hourly Orders Chart
-  drawOrdersHourlyChart(orders, productCategories, prefix + '-hourly-canvas');
+  // ── Hourly Orders Chart ──
+  drawOrdersHourlyChart(orders, productCategories);
 
-  // Brand Breakdown
+  // ── Brand Breakdown ──
   const brandStats = {};
   for(const [, o] of orders) {
     const bKey = o.brand;
@@ -5990,7 +6371,7 @@ function renderOrderView(prefix, orders, rowsWithOrders, showNonTCW) {
     .map(([,s]) => s)
     .sort((a,b) => b.orders - a.orders);
 
-  const brandBody = document.getElementById(prefix + '-brand-body');
+  const brandBody = document.getElementById('om-brand-body');
   brandBody.innerHTML = '';
   const maxBrandOrders = brandEntries.length ? brandEntries[0].orders : 1;
 
@@ -6014,10 +6395,10 @@ function renderOrderView(prefix, orders, rowsWithOrders, showNonTCW) {
     brandBody.appendChild(tr);
   });
 
-  // Order Detail Table
-  const detailBody = document.getElementById(prefix + '-detail-body');
+  // ── Order Detail Table ──
+  const detailBody = document.getElementById('om-detail-body');
   detailBody.innerHTML = '';
-  document.getElementById(prefix + '-detail-count').textContent = `(${totalOrders} orders)`;
+  document.getElementById('om-detail-count').textContent = `(${totalOrders} orders)`;
 
   const sortedOrders = orders.sort((a,b) => {
     const aMin = a[1].hour * 60 + (a[1].minute || 0);
@@ -6032,7 +6413,6 @@ function renderOrderView(prefix, orders, rowsWithOrders, showNonTCW) {
     tr.style.borderBottom = '1px solid var(--border)';
     tr.innerHTML = `
       <td style="padding:6px;color:var(--cyan);">${orderNum}</td>
-      <td style="text-align:center;padding:6px;">${o.dropOffLocation || '—'}</td>
       <td style="text-align:center;padding:6px;">${o.productCategory}</td>
       <td style="text-align:center;padding:6px;">${o.brand}</td>
       <td style="text-align:center;padding:6px;font-weight:600;">${o.units}</td>
@@ -6044,34 +6424,8 @@ function renderOrderView(prefix, orders, rowsWithOrders, showNonTCW) {
   });
 }
 
-function buildOrdersMixMB() {
-  const data = gatherOrderData('Material Bank');
-  if(!data || !data.orders.length) {
-    ['mb-kpi-orders','mb-kpi-units','mb-kpi-upo','mb-kpi-cats','mb-kpi-brands','mb-kpi-nontcw'].forEach(id => {
-      const el = document.getElementById(id); if(el) el.textContent = '—';
-    });
-    const sub = document.getElementById('mb-kpi-orders-sub');
-    if(sub) sub.textContent = 'no Material Bank order data';
-    return;
-  }
-  renderOrderView('mb', data.orders, data.rowsWithOrders, true);
-}
-
-function buildOrdersMixFul() {
-  const data = gatherOrderData('Fulfillment');
-  if(!data || !data.orders.length) {
-    ['ful-kpi-orders','ful-kpi-units','ful-kpi-upo','ful-kpi-cats','ful-kpi-brands'].forEach(id => {
-      const el = document.getElementById(id); if(el) el.textContent = '—';
-    });
-    const sub = document.getElementById('ful-kpi-orders-sub');
-    if(sub) sub.textContent = 'no Fulfillment order data';
-    return;
-  }
-  renderOrderView('ful', data.orders, data.rowsWithOrders, false);
-}
-
-function drawOrdersDonut(catEntries, totalOrders, canvasId) {
-  const canvas = document.getElementById(canvasId || 'mb-donut-canvas');
+function drawOrdersDonut(catEntries, totalOrders) {
+  const canvas = document.getElementById('om-donut-canvas');
   if(!canvas) return;
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
@@ -6143,8 +6497,8 @@ function drawOrdersDonut(catEntries, totalOrders, canvasId) {
   });
 }
 
-function drawOrdersHourlyChart(orders, productCategories, canvasId) {
-  const canvas = document.getElementById(canvasId || 'mb-hourly-canvas');
+function drawOrdersHourlyChart(orders, productCategories) {
+  const canvas = document.getElementById('om-hourly-canvas');
   if(!canvas) return;
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
@@ -6269,9 +6623,8 @@ document.querySelectorAll('.tab').forEach(tab => {
       if(id==='uphtargets') buildUPHTargets();
       if(id==='pickpath') { drawPickPathCanvas([], ppCurrentUser); if(ppCurrentUser) renderPickPath(); }
       if(id==='shiftbreakdown' && txData.length > 0) { buildShiftBreakdown(); }
-      if(id==='forecast' && fcModel) { fcBuildHourlyChart(); }
-      if(id==='ordersmix-mb' && txData.length > 0) { buildOrdersMixMB(); }
-      if(id==='ordersmix-ful' && txData.length > 0) { buildOrdersMixFul(); }
+      if(id==='forecast' && fcData.length > 0) { fcDrawZoneMap(); fcDrawHeatMap(); fcBuildHourlyChart(); }
+      if(id==='ordersmix' && txData.length > 0) { buildOrdersMix(); }
     }, 30);
   });
 });
@@ -6287,9 +6640,8 @@ window.addEventListener('resize', () => {
   if(active==='overview') buildHourlyChart();
   if(active==='uphtargets') drawUPHPickPath();
   if(active==='pickpath') renderPickPath();
-  if(active==='forecast' && fcModel) { fcBuildHourlyChart(); }
-  if(active==='ordersmix-mb' && txData.length > 0) { buildOrdersMixMB(); }
-  if(active==='ordersmix-ful' && txData.length > 0) { buildOrdersMixFul(); }
+  if(active==='forecast' && fcData.length > 0) { fcDrawZoneMap(); fcDrawHeatMap(); fcBuildHourlyChart(); }
+  if(active==='ordersmix' && txData.length > 0) { buildOrdersMix(); }
 });
 </script>
 </body>
