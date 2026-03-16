@@ -5220,6 +5220,7 @@ function fcPrepareTrainingData() {
   const unitTargets = [];
   const brandTargets = [];
   const zoneTargets = [];
+  const targetMeta = [];
 
   for(let i = FC_SEQ_LEN; i < sortedHours.length; i++) {
     const target = sortedHours[i];
@@ -5248,9 +5249,17 @@ function fcPrepareTrainingData() {
     const zoneDist = zones.map(z => target.zoneCounts[z] || 0);
     const zoneTotal = zoneDist.reduce((s, v) => s + v, 0) || 1;
     zoneTargets.push(zoneDist.map(v => v / zoneTotal));
+
+    targetMeta.push({
+      date: target.date,
+      hour: target.hour,
+      day: target.day,
+      category: target.category,
+      actualUnits: target.units
+    });
   }
 
-  return { sequences, unitTargets, brandTargets, zoneTargets, days, categories, zones, brands, maxUnits, featureSize, sortedHours };
+  return { sequences, unitTargets, brandTargets, zoneTargets, targetMeta, days, categories, zones, brands, maxUnits, featureSize, sortedHours };
 }
 
 function fcOneHotEncode(value, classes) {
@@ -5281,7 +5290,7 @@ async function fcTrainAndForecast() {
       return;
     }
 
-    const { sequences, unitTargets, brandTargets, zoneTargets, days, categories, zones, brands, maxUnits, featureSize, sortedHours } = prepared;
+    const { sequences, unitTargets, brandTargets, zoneTargets, targetMeta, days, categories, zones, brands, maxUnits, featureSize, sortedHours } = prepared;
     const numBrands = brands.length;
     const numZones = zones.length;
 
@@ -5347,18 +5356,23 @@ async function fcTrainAndForecast() {
     await new Promise(r => setTimeout(r, 50));
 
     // Train multi-output model
+    const epochCount = Math.min(60, Math.max(25, Math.floor(sequences.length / 8)));
     const history = await model.fit(xTensor, [yUnitsTensor, yBrandTensor, yZoneTensor], {
-      epochs: 80,
-      batchSize: Math.min(32, Math.max(8, Math.floor(sequences.length / 4))),
+      epochs: epochCount,
+      batchSize: Math.min(64, Math.max(16, Math.floor(sequences.length / 6))),
       validationSplit: 0.15,
       shuffle: true,
-      callbacks: {
-        onEpochEnd: (epoch, logs) => {
-          if(epoch % 10 === 0) {
-            statusEl.textContent = `Epoch ${epoch + 1}/80 — loss: ${logs.loss.toFixed(4)}`;
+      callbacks: [
+        tf.callbacks.earlyStopping({ monitor: 'val_loss', patience: 8, restoreBestWeight: true }),
+        {
+          onEpochEnd: async (epoch, logs) => {
+            if(epoch % 5 === 0) {
+              statusEl.textContent = `Epoch ${epoch + 1}/${epochCount} — loss: ${logs.loss.toFixed(4)}`;
+            }
+            await tf.nextFrame();
           }
         }
-      }
+      ]
     });
 
     fcModel = model;
@@ -5366,7 +5380,7 @@ async function fcTrainAndForecast() {
     fcTrainingLoss = losses[losses.length - 1];
 
     // Store metadata for predictions
-    fcModel._fcMeta = { days, categories, zones, brands, maxUnits, featureSize, sortedHours };
+    fcModel._fcMeta = { days, categories, zones, brands, maxUnits, featureSize, sortedHours, sequences, targetMeta };
 
     // Compute R² for units regression output
     const allPreds = model.predict(xTensor);
@@ -5415,7 +5429,7 @@ async function fcTrainAndForecast() {
 
 function fcApplyFiltersAndPredict() {
   if(!fcModel || !fcModel._fcMeta) return;
-  const { days, categories, zones, brands, maxUnits, featureSize } = fcModel._fcMeta;
+  const { zones, brands, maxUnits, sequences, targetMeta } = fcModel._fcMeta;
 
   // Filter source data by category and day
   let filtered = uploadedTxAll.slice();
@@ -5445,88 +5459,59 @@ function fcApplyFiltersAndPredict() {
     fcBrandActuals[b] = (fcBrandActuals[b] || 0) + r.units;
   });
 
-  // ─── Build prediction sequences for each operational hour ───
-  // Aggregate filtered data by hour for building context sequences
-  const filteredHourly = {};
-  filtered.forEach(r => {
-    const h = r.hour;
-    if(!filteredHourly[h]) filteredHourly[h] = { units: 0, day: r.dayOfWeek || 'Unknown', category: r.promoType || 'Unknown' };
-    filteredHourly[h].units += r.units;
+  // Use real historical sequences that match the active filters.
+  const selectedIndices = [];
+  (targetMeta || []).forEach((m, idx) => {
+    if(fcFilterCat !== 'all' && m.category !== fcFilterCat) return;
+    if(fcFilterDay !== 'all' && m.day !== fcFilterDay) return;
+    if(fcFilterHours.length > 0 && !fcFilterHours.includes(m.hour)) return;
+    selectedIndices.push(idx);
   });
 
   fcPredictions = {};
-  const brandProbsPerHour = {};
-  const zoneProbsPerHour = {};
+  FC_HOURS.forEach(h => fcPredictions[h] = 0);
+  const brandWeighted = new Array(brands.length).fill(0);
+  const zoneWeighted = new Array(zones.length).fill(0);
 
-  const predSequences = [];
-  const predHoursList = [];
-
-  FC_HOURS.forEach(h => {
-    const seq = [];
-    for(let offset = FC_SEQ_LEN; offset > 0; offset--) {
-      let prevH = h - offset;
-      if(prevH < 0) prevH += 24;
-      const data = filteredHourly[prevH] || {
-        units: 0,
-        day: fcFilterDay !== 'all' ? fcFilterDay : (days[0] || 'Unknown'),
-        category: fcFilterCat !== 'all' ? fcFilterCat : (categories[0] || 'Unknown')
-      };
-      const hourRad = (prevH / 24) * 2 * Math.PI;
-      seq.push([
-        data.units / maxUnits,
-        Math.sin(hourRad), Math.cos(hourRad),
-        ...days.map(d => d === data.day ? 1 : 0),
-        ...categories.map(c => c === data.category ? 1 : 0)
-      ]);
-    }
-    predSequences.push(seq);
-    predHoursList.push(h);
-  });
-
-  if(predSequences.length > 0) {
+  if(selectedIndices.length > 0) {
+    const predSequences = selectedIndices.map(i => sequences[i]);
     const predTensor = tf.tensor3d(predSequences);
     const preds = fcModel.predict(predTensor);
     const unitPreds = preds[0].dataSync();
     const brandPreds = preds[1].dataSync();
     const zonePreds = preds[2].dataSync();
 
-    predHoursList.forEach((h, i) => {
-      fcPredictions[h] = Math.max(0, unitPreds[i] * maxUnits);
+    selectedIndices.forEach((srcIdx, i) => {
+      const h = targetMeta[srcIdx].hour;
+      const predUnits = Math.max(0, unitPreds[i] * maxUnits);
+      fcPredictions[h] = (fcPredictions[h] || 0) + predUnits;
 
-      // Brand probabilities for this hour
       const bStart = i * brands.length;
-      brandProbsPerHour[h] = brands.map((b, bi) => brandPreds[bStart + bi]);
+      for(let bi = 0; bi < brands.length; bi++) {
+        brandWeighted[bi] += brandPreds[bStart + bi] * predUnits;
+      }
 
-      // Zone probabilities for this hour
       const zStart = i * zones.length;
-      zoneProbsPerHour[h] = zones.map((z, zi) => zonePreds[zStart + zi]);
+      for(let zi = 0; zi < zones.length; zi++) {
+        zoneWeighted[zi] += zonePreds[zStart + zi] * predUnits;
+      }
     });
 
     preds.forEach(t => t.dispose());
     predTensor.dispose();
   }
 
-  // Aggregate brand predictions (weighted by predicted units per hour)
+  // Aggregate brand predictions (weighted by predicted units)
   fcBrandPredictions = {};
   const totalPredUnits = Object.values(fcPredictions).reduce((s, v) => s + v, 0) || 1;
   brands.forEach((b, bi) => {
-    let weightedProb = 0;
-    FC_HOURS.forEach(h => {
-      const probs = brandProbsPerHour[h];
-      if(probs) weightedProb += probs[bi] * (fcPredictions[h] || 0);
-    });
-    fcBrandPredictions[b] = weightedProb / totalPredUnits;
+    fcBrandPredictions[b] = brandWeighted[bi] / totalPredUnits;
   });
 
-  // Aggregate zone predictions (predicted units per zone from softmax * predicted volume)
+  // Aggregate zone predictions (predicted units per zone)
   fcZonePredictions = {};
   zones.forEach((z, zi) => {
-    let weightedUnits = 0;
-    FC_HOURS.forEach(h => {
-      const probs = zoneProbsPerHour[h];
-      if(probs) weightedUnits += probs[zi] * (fcPredictions[h] || 0);
-    });
-    fcZonePredictions[z] = weightedUnits;
+    fcZonePredictions[z] = zoneWeighted[zi];
   });
 
   // Apply hour filter for display
