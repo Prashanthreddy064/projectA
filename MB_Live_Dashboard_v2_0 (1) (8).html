@@ -218,6 +218,46 @@ main { padding: 20px 28px; }
   border-radius: 2px;
 }
 
+.section-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.section-hero h2 {
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  margin-bottom: 4px;
+}
+
+.section-hero p {
+  font-size: 11px;
+  color: var(--text2);
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.order-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.order-filter-input {
+  background: #0f1a2e;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 6px 9px;
+  font-family: 'IBM Plex Mono', monospace;
+  min-width: 170px;
+}
+
 /* ─── MAP ─────────────────────────────────── */
 .map-wrap {
   background: var(--surf2);
@@ -1280,6 +1320,14 @@ tr:hover td { background: rgba(255,255,255,0.015); }
 <!-- FORECAST DASHBOARD -->
 <div id="sec-forecast" class="section">
 
+  <div class="section-hero">
+    <div>
+      <h2>Forecasting Dashboard</h2>
+      <p>Two-week outlook for volume, zone demand, and staffing recommendations.</p>
+    </div>
+    <span id="fc-date-range" style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;">No forecast date range</span>
+  </div>
+
   <!-- Upload + Controls -->
   <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Forecasting Dashboard — Two-Week Look-Ahead</div>
@@ -1555,6 +1603,12 @@ tr:hover td { background: rgba(255,255,255,0.015); }
 
 <!-- MATERIAL BANK ORDERS OVERVIEW -->
 <div id="sec-materialbank" class="section">
+  <div class="section-hero">
+    <div>
+      <h2>Material Bank Orders</h2>
+      <p>Live summary of Material Bank flow from Drop Off Location with quick order lookup.</p>
+    </div>
+  </div>
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
       <div class="card-title" style="margin-bottom:0;">Material Bank Order View Details</div>
@@ -1566,6 +1620,11 @@ tr:hover td { background: rgba(255,255,255,0.015); }
       <div class="kpi" style="--kpi-color:var(--green)"><div class="kpi-lbl">Lines</div><div class="kpi-val" id="mb-kpi-lines">—</div></div>
       <div class="kpi" style="--kpi-color:var(--purple)"><div class="kpi-lbl">Drop Off Types</div><div class="kpi-val" id="mb-kpi-types">—</div></div>
       <div class="kpi" style="--kpi-color:#14b8a6"><div class="kpi-lbl">Orders Without Tile / Carpet / Wolf Gordon</div><div class="kpi-val" id="mb-kpi-non-tcw">—</div></div>
+    </div>
+    <div class="order-filter-bar">
+      <label style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;">Order Search</label>
+      <input class="order-filter-input" id="mb-search" type="text" placeholder="Filter by order no, picker, or drop off" oninput="buildMaterialBankOverview()">
+      <span id="mb-filter-count" style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
     </div>
     <div style="max-height:460px;overflow:auto;">
       <table style="width:100%;font-size:11px;font-family:'IBM Plex Mono',monospace;">
@@ -1582,6 +1641,12 @@ tr:hover td { background: rgba(255,255,255,0.015); }
 
 <!-- FULFILLMENT ORDERS OVERVIEW -->
 <div id="sec-fulfillment" class="section">
+  <div class="section-hero">
+    <div>
+      <h2>Fulfillment Orders</h2>
+      <p>Flow-level fulfillment order visibility with filtered detail rows.</p>
+    </div>
+  </div>
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
       <div class="card-title" style="margin-bottom:0;">Fulfillment Order View Details</div>
@@ -1592,6 +1657,11 @@ tr:hover td { background: rgba(255,255,255,0.015); }
       <div class="kpi" style="--kpi-color:var(--blue)"><div class="kpi-lbl">Units</div><div class="kpi-val" id="ful-kpi-units">—</div></div>
       <div class="kpi" style="--kpi-color:var(--green)"><div class="kpi-lbl">Lines</div><div class="kpi-val" id="ful-kpi-lines">—</div></div>
       <div class="kpi" style="--kpi-color:var(--purple)"><div class="kpi-lbl">Flow Types</div><div class="kpi-val" id="ful-kpi-types">—</div></div>
+    </div>
+    <div class="order-filter-bar">
+      <label style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;">Order Search</label>
+      <input class="order-filter-input" id="ful-search" type="text" placeholder="Filter by order no, picker, or drop off" oninput="buildFulfillmentOverview()">
+      <span id="ful-filter-count" style="font-size:10px;color:var(--text3);font-family:'IBM Plex Mono',monospace;"></span>
     </div>
     <div style="max-height:460px;overflow:auto;">
       <table style="width:100%;font-size:11px;font-family:'IBM Plex Mono',monospace;">
@@ -5807,6 +5877,7 @@ function handleForecastFile(file) {
 
     fcData = parsed;
     document.getElementById('fc-row-count').textContent = parsed.length.toLocaleString() + ' forecast rows loaded';
+    fcUpdateDateRangeLabel();
 
     const badge = document.getElementById('fc-data-badge');
     badge.className = 'data-badge live';
@@ -5817,6 +5888,15 @@ function handleForecastFile(file) {
     applyForecastFilters();
   };
   reader.readAsArrayBuffer(file);
+}
+
+function fcUpdateDateRangeLabel() {
+  const el = document.getElementById('fc-date-range');
+  if(!el) return;
+  if(fcData.length === 0) { el.textContent = 'No forecast date range'; return; }
+  const dates = [...new Set(fcData.map(r => (r.date || '').trim()).filter(Boolean))].sort();
+  if(!dates.length) { el.textContent = 'Date range unavailable'; return; }
+  el.textContent = dates.length === 1 ? `Date: ${dates[0]}` : `Date range: ${dates[0]} → ${dates[dates.length - 1]}`;
 }
 
 // ─── Filter & Render ─────────────────────────
@@ -6624,11 +6704,18 @@ function buildOrderFlowOverview(flowSet, cfg) {
   }
 
   const entries = Object.entries(orderMap).sort((a,b) => (a[1].hour*60 + (a[1].minute||0)) - (b[1].hour*60 + (b[1].minute||0)));
-  const totalOrders = entries.length;
-  const totalUnits = entries.reduce((s,[,o]) => s + o.units, 0);
-  const totalLines = entries.reduce((s,[,o]) => s + o.lines, 0);
-  const flowTypes = new Set(entries.map(([,o]) => o.flow));
-  const nonTCWOrders = entries.filter(([,o]) => ![...o.brands].some(isTileCarpetWolfGordonBrand)).length;
+  const searchEl = cfg.searchInput ? document.getElementById(cfg.searchInput) : null;
+  const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  const filteredEntries = q ? entries.filter(([orderNo, o]) => {
+    const pickers = [...o.pickers].join(' ').toLowerCase();
+    return String(orderNo).toLowerCase().includes(q) || o.flow.toLowerCase().includes(q) || pickers.includes(q);
+  }) : entries;
+
+  const totalOrders = filteredEntries.length;
+  const totalUnits = filteredEntries.reduce((s,[,o]) => s + o.units, 0);
+  const totalLines = filteredEntries.reduce((s,[,o]) => s + o.lines, 0);
+  const flowTypes = new Set(filteredEntries.map(([,o]) => o.flow));
+  const nonTCWOrders = filteredEntries.filter(([,o]) => ![...o.brands].some(isTileCarpetWolfGordonBrand)).length;
 
   document.getElementById(cfg.kpiOrders).textContent = totalOrders.toLocaleString();
   document.getElementById(cfg.kpiUnits).textContent = totalUnits.toLocaleString();
@@ -6637,6 +6724,11 @@ function buildOrderFlowOverview(flowSet, cfg) {
   if(cfg.kpiNonTCW) {
     const el = document.getElementById(cfg.kpiNonTCW);
     if(el) el.textContent = nonTCWOrders.toLocaleString();
+  }
+
+  if(cfg.filterCount) {
+    const filterCountEl = document.getElementById(cfg.filterCount);
+    if(filterCountEl) filterCountEl.textContent = q ? `Showing ${filteredEntries.length.toLocaleString()} of ${entries.length.toLocaleString()} orders` : `${entries.length.toLocaleString()} orders`;
   }
 
   const dateEl = document.getElementById(cfg.dateLabel);
@@ -6648,14 +6740,14 @@ function buildOrderFlowOverview(flowSet, cfg) {
 
   const body = document.getElementById(cfg.tableBody);
   body.innerHTML = '';
-  if(!entries.length) {
+  if(!filteredEntries.length) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="6" style="padding:12px 6px;color:var(--text3);text-align:center;">No matching orders found in Drop Off Location for this date.</td>`;
+    tr.innerHTML = `<td colspan="6" style="padding:12px 6px;color:var(--text3);text-align:center;">${q ? 'No orders match the search filter.' : 'No matching orders found in Drop Off Location for this date.'}</td>`;
     body.appendChild(tr);
     return;
   }
 
-  entries.forEach(([orderNo, o]) => {
+  filteredEntries.forEach(([orderNo, o]) => {
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid var(--border)';
     const timeStr = `${String(o.hour).padStart(2,'0')}:${String(o.minute || 0).padStart(2,'0')}`;
@@ -6679,7 +6771,9 @@ function buildMaterialBankOverview() {
     kpiTypes: 'mb-kpi-types',
     kpiNonTCW: 'mb-kpi-non-tcw',
     dateLabel: 'mb-date-label',
-    tableBody: 'mb-detail-body'
+    tableBody: 'mb-detail-body',
+    searchInput: 'mb-search',
+    filterCount: 'mb-filter-count'
   });
 }
 
@@ -6690,7 +6784,9 @@ function buildFulfillmentOverview() {
     kpiLines: 'ful-kpi-lines',
     kpiTypes: 'ful-kpi-types',
     dateLabel: 'ful-date-label',
-    tableBody: 'ful-detail-body'
+    tableBody: 'ful-detail-body',
+    searchInput: 'ful-search',
+    filterCount: 'ful-filter-count'
   });
 }
 document.querySelectorAll('.tab').forEach(tab => {
