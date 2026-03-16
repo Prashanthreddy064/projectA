@@ -5334,6 +5334,7 @@ function fcPrepareTrainingData() {
     });
   }
 
+  if(!sequences.length) return null;
   return { sequences, unitTargets, brandTargets, zoneTargets, targetMeta, days, categories, zones, brands, maxUnits, featureSize, sortedHours };
 }
 
@@ -5875,8 +5876,10 @@ function fcBuildStaffingTable() {
 // ─── Hourly Volume Chart (Actual vs Forecast) ─────────────────────
 function fcBuildHourlyChart() {
   const canvas = document.getElementById('fc-hourly-canvas');
+  if(!canvas) return;
   const ctx = canvas.getContext('2d');
-  const W = canvas.parentElement.clientWidth - 40;
+  const parentW = canvas.parentElement.clientWidth;
+  const W = Math.max(300, (parentW > 0 ? parentW : 800) - 40);
   const H = 220;
   canvas.width = W; canvas.height = H;
   ctx.clearRect(0, 0, W, H);
@@ -6434,7 +6437,7 @@ document.querySelectorAll('.tab').forEach(tab => {
       if(id==='uphtargets') buildUPHTargets();
       if(id==='pickpath') { drawPickPathCanvas([], ppCurrentUser); if(ppCurrentUser) renderPickPath(); }
       if(id==='shiftbreakdown' && txData.length > 0) { buildShiftBreakdown(); }
-      if(id==='forecast' && fcModel) { fcBuildHourlyChart(); }
+      if(id==='forecast' && fcModel) { fcApplyFiltersAndPredict(); }
       if(id==='ordersmix-mb' && txData.length > 0) { buildOrdersMixMB(); }
       if(id==='ordersmix-ful' && txData.length > 0) { buildOrdersMixFul(); }
     }, 30);
@@ -6452,7 +6455,7 @@ window.addEventListener('resize', () => {
   if(active==='overview') buildHourlyChart();
   if(active==='uphtargets') drawUPHPickPath();
   if(active==='pickpath') renderPickPath();
-  if(active==='forecast' && fcModel) { fcBuildHourlyChart(); }
+  if(active==='forecast' && fcModel) { fcApplyFiltersAndPredict(); }
   if(active==='ordersmix-mb' && txData.length > 0) { buildOrdersMixMB(); }
   if(active==='ordersmix-ful' && txData.length > 0) { buildOrdersMixFul(); }
 });
