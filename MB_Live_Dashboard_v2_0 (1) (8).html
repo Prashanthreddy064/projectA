@@ -5378,7 +5378,7 @@ async function fcTrainAndForecast() {
       validationSplit: 0.15,
       shuffle: true,
       callbacks: [
-        tf.callbacks.earlyStopping({ monitor: 'val_loss', patience: 8, restoreBestWeights: true }),
+        tf.callbacks.earlyStopping({ monitor: 'val_loss', patience: 8 }),
         tf.callbacks.customCallback({
           onEpochEnd: async (epoch, logs) => {
             if(epoch % 5 === 0) {
