@@ -5221,7 +5221,12 @@ function fcPrepareTrainingData() {
 
   const days = [...new Set(uploadedTxAll.map(r => r.dayOfWeek || '').filter(Boolean))];
   const categories = [...new Set(uploadedTxAll.map(r => r.promoType || '').filter(Boolean))];
-  const zones = [...new Set(uploadedTxAll.map(r => r.zone || '').filter(Boolean))];
+
+  // Keep at least one zone class so the zone softmax head is always valid.
+  // Some uploads may not contain a populated location column.
+  const zoneSet = new Set(uploadedTxAll.map(r => r.zone || 'No Location').filter(Boolean));
+  if(!zoneSet.size) zoneSet.add('No Location');
+  const zones = [...zoneSet];
 
   // Collect brand frequencies and limit to top FC_MAX_BRANDS
   const brandFreq = {};
