@@ -3113,6 +3113,45 @@ function fmt12(h) {
   return (h-12)+' PM';
 }
 
+function buildThreeHourIntervals(hoursArray) {
+  const unique = [...new Set(hoursArray.filter(h => !isNaN(h)))].sort((a,b) => {
+    const ai = a < 6 ? a + 24 : a;
+    const bi = b < 6 ? b + 24 : b;
+    return ai - bi;
+  });
+  if(!unique.length) return [];
+  const intervals = [];
+  const opOrder = unique.map(h => h < 6 ? h + 24 : h);
+  const minOp = Math.min(...opOrder);
+  const maxOp = Math.max(...opOrder);
+  let start = Math.floor(minOp / 3) * 3;
+  while(start <= maxOp) {
+    const end = start + 3;
+    const hours = [];
+    for(let h = start; h < end; h++) {
+      const actual = h >= 24 ? h - 24 : h;
+      if(unique.includes(actual)) hours.push(actual);
+    }
+    if(hours.length) {
+      const startActual = start >= 24 ? start - 24 : start;
+      const endActual = end >= 24 ? end - 24 : end;
+      intervals.push({
+        key: `${startActual}-${endActual}`,
+        startHour: startActual,
+        endHour: endActual,
+        opStart: start,
+        hours
+      });
+    }
+    start += 3;
+  }
+  return intervals;
+}
+
+function formatIntervalLabel(interval) {
+  return fmt12(interval.startHour) + ' – ' + fmt12(interval.endHour);
+}
+
 function getHeatIntervals() {
   if(dataSource !== 'dropped' || !txData.length) return [];
   return buildThreeHourIntervals(txData.map(r => r.hour));
@@ -5379,14 +5418,14 @@ async function fcTrainAndForecast() {
       shuffle: true,
       callbacks: [
         tf.callbacks.earlyStopping({ monitor: 'val_loss', patience: 8 }),
-        tf.callbacks.customCallback({
+        {
           onEpochEnd: async (epoch, logs) => {
             if(epoch % 5 === 0) {
               statusEl.textContent = `Epoch ${epoch + 1}/${epochCount} — loss: ${logs.loss.toFixed(4)}`;
             }
             await tf.nextFrame();
           }
-        })
+        }
       ]
     });
 
