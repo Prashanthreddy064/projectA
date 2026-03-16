@@ -5219,13 +5219,23 @@ function fcPrepareTrainingData() {
   // Build sequence-based training data for multi-output TCN
   if(!uploadedTxAll || !uploadedTxAll.length) return null;
 
-  const days = [...new Set(uploadedTxAll.map(r => r.dayOfWeek || '').filter(Boolean))];
-  const categories = [...new Set(uploadedTxAll.map(r => r.promoType || '').filter(Boolean))];
-  const zones = [...new Set(uploadedTxAll.map(r => r.zone || '').filter(Boolean))];
+  // Filter out rows with missing/invalid data: 0 units, missing hours, N/A zones
+  const validRows = uploadedTxAll.filter(r => {
+    if(!r.units || r.units <= 0) return false;
+    if(r.hour == null || isNaN(r.hour)) return false;
+    if(!r.dateValue) return false;
+    return true;
+  });
+  if(!validRows.length) return null;
+
+  const days = [...new Set(validRows.map(r => r.dayOfWeek || '').filter(Boolean))];
+  const categories = [...new Set(validRows.map(r => r.promoType || '').filter(Boolean))];
+  // Include 'No Location' for N/A zones so the model can still train on them
+  const zones = [...new Set(validRows.map(r => r.zone || 'No Location').filter(Boolean))];
 
   // Collect brand frequencies and limit to top FC_MAX_BRANDS
   const brandFreq = {};
-  uploadedTxAll.forEach(r => {
+  validRows.forEach(r => {
     const b = r.productBrand || '';
     if(b) brandFreq[b] = (brandFreq[b] || 0) + r.units;
   });
@@ -5235,7 +5245,7 @@ function fcPrepareTrainingData() {
 
   // Aggregate by date+hour+category for sequence building (separates Promo / Non-Promo)
   const hourlyAgg = {};
-  uploadedTxAll.forEach(r => {
+  validRows.forEach(r => {
     const key = `${r.dateValue}|${r.hour}|${r.promoType || 'Unknown'}`;
     if(!hourlyAgg[key]) {
       hourlyAgg[key] = {
@@ -5289,6 +5299,9 @@ function fcPrepareTrainingData() {
         s.category === 'Promo' ? 1 : 0
       ]);
     }
+    // Guard against NaN in feature vectors (from missing data)
+    const hasNaN = seq.some(row => row.some(v => !Number.isFinite(v)));
+    if(hasNaN) continue;
     sequences.push(seq);
 
     // Unit target (normalized)
@@ -5416,17 +5429,14 @@ async function fcTrainAndForecast() {
       batchSize: Math.min(64, Math.max(16, Math.floor(sequences.length / 6))),
       validationSplit: 0.15,
       shuffle: true,
-      callbacks: [
-        tf.callbacks.earlyStopping({ monitor: 'val_loss', patience: 8 }),
-        {
-          onEpochEnd: async (epoch, logs) => {
-            if(epoch % 5 === 0) {
-              statusEl.textContent = `Epoch ${epoch + 1}/${epochCount} — loss: ${logs.loss.toFixed(4)}`;
-            }
-            await tf.nextFrame();
+      callbacks: {
+        onEpochEnd: async (epoch, logs) => {
+          if(epoch % 5 === 0) {
+            statusEl.textContent = `Epoch ${epoch + 1}/${epochCount} — loss: ${logs.loss.toFixed(4)}`;
           }
+          await tf.nextFrame();
         }
-      ]
+      }
     });
 
     fcModel = model;
