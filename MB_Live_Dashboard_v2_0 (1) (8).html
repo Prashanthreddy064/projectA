@@ -3,6 +3,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5219,19 +5220,6 @@ function fcPrepareTrainingData() {
   // Build sequence-based training data for multi-output TCN
   if(!uploadedTxAll || !uploadedTxAll.length) return null;
 
-  // Filter out rows with missing/invalid data: 0 units, missing hours, N/A zones
-  const validRows = uploadedTxAll.filter(r => {
-    if(!r.units || r.units <= 0) return false;
-    if(r.hour == null || isNaN(r.hour)) return false;
-    if(!r.dateValue) return false;
-    return true;
-  });
-  if(!validRows.length) return null;
-
-  const days = [...new Set(validRows.map(r => r.dayOfWeek || '').filter(Boolean))];
-  const categories = [...new Set(validRows.map(r => r.promoType || '').filter(Boolean))];
-  // Include 'No Location' for N/A zones so the model can still train on them
-  const zones = [...new Set(validRows.map(r => r.zone || 'No Location').filter(Boolean))];
   const days = [...new Set(uploadedTxAll.map(r => r.dayOfWeek || '').filter(Boolean))];
   const categories = [...new Set(uploadedTxAll.map(r => r.promoType || '').filter(Boolean))];
 
@@ -5243,7 +5231,7 @@ function fcPrepareTrainingData() {
 
   // Collect brand frequencies and limit to top FC_MAX_BRANDS
   const brandFreq = {};
-  validRows.forEach(r => {
+  uploadedTxAll.forEach(r => {
     const b = r.productBrand || '';
     if(b) brandFreq[b] = (brandFreq[b] || 0) + r.units;
   });
@@ -5253,7 +5241,7 @@ function fcPrepareTrainingData() {
 
   // Aggregate by date+hour+category for sequence building (separates Promo / Non-Promo)
   const hourlyAgg = {};
-  validRows.forEach(r => {
+  uploadedTxAll.forEach(r => {
     const key = `${r.dateValue}|${r.hour}|${r.promoType || 'Unknown'}`;
     if(!hourlyAgg[key]) {
       hourlyAgg[key] = {
@@ -5307,9 +5295,6 @@ function fcPrepareTrainingData() {
         s.category === 'Promo' ? 1 : 0
       ]);
     }
-    // Guard against NaN in feature vectors (from missing data)
-    const hasNaN = seq.some(row => row.some(v => !Number.isFinite(v)));
-    if(hasNaN) continue;
     sequences.push(seq);
 
     // Unit target (normalized)
@@ -5334,7 +5319,6 @@ function fcPrepareTrainingData() {
     });
   }
 
-  if(!sequences.length) return null;
   return { sequences, unitTargets, brandTargets, zoneTargets, targetMeta, days, categories, zones, brands, maxUnits, featureSize, sortedHours };
 }
 
@@ -5438,14 +5422,17 @@ async function fcTrainAndForecast() {
       batchSize: Math.min(64, Math.max(16, Math.floor(sequences.length / 6))),
       validationSplit: 0.15,
       shuffle: true,
-      callbacks: {
-        onEpochEnd: async (epoch, logs) => {
-          if(epoch % 5 === 0) {
-            statusEl.textContent = `Epoch ${epoch + 1}/${epochCount} — loss: ${logs.loss.toFixed(4)}`;
+      callbacks: [
+        tf.callbacks.earlyStopping({ monitor: 'val_loss', patience: 8 }),
+        {
+          onEpochEnd: async (epoch, logs) => {
+            if(epoch % 5 === 0) {
+              statusEl.textContent = `Epoch ${epoch + 1}/${epochCount} — loss: ${logs.loss.toFixed(4)}`;
+            }
+            await tf.nextFrame();
           }
-          await tf.nextFrame();
         }
-      }
+      ]
     });
 
     fcModel = model;
@@ -5876,10 +5863,8 @@ function fcBuildStaffingTable() {
 // ─── Hourly Volume Chart (Actual vs Forecast) ─────────────────────
 function fcBuildHourlyChart() {
   const canvas = document.getElementById('fc-hourly-canvas');
-  if(!canvas) return;
   const ctx = canvas.getContext('2d');
-  const parentW = canvas.parentElement.clientWidth;
-  const W = Math.max(300, (parentW > 0 ? parentW : 800) - 40);
+  const W = canvas.parentElement.clientWidth - 40;
   const H = 220;
   canvas.width = W; canvas.height = H;
   ctx.clearRect(0, 0, W, H);
@@ -6437,7 +6422,7 @@ document.querySelectorAll('.tab').forEach(tab => {
       if(id==='uphtargets') buildUPHTargets();
       if(id==='pickpath') { drawPickPathCanvas([], ppCurrentUser); if(ppCurrentUser) renderPickPath(); }
       if(id==='shiftbreakdown' && txData.length > 0) { buildShiftBreakdown(); }
-      if(id==='forecast' && fcModel) { fcApplyFiltersAndPredict(); }
+      if(id==='forecast' && fcModel) { fcBuildHourlyChart(); }
       if(id==='ordersmix-mb' && txData.length > 0) { buildOrdersMixMB(); }
       if(id==='ordersmix-ful' && txData.length > 0) { buildOrdersMixFul(); }
     }, 30);
@@ -6455,7 +6440,7 @@ window.addEventListener('resize', () => {
   if(active==='overview') buildHourlyChart();
   if(active==='uphtargets') drawUPHPickPath();
   if(active==='pickpath') renderPickPath();
-  if(active==='forecast' && fcModel) { fcApplyFiltersAndPredict(); }
+  if(active==='forecast' && fcModel) { fcBuildHourlyChart(); }
   if(active==='ordersmix-mb' && txData.length > 0) { buildOrdersMixMB(); }
   if(active==='ordersmix-ful' && txData.length > 0) { buildOrdersMixFul(); }
 });
