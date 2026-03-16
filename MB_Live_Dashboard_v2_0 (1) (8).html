@@ -1543,11 +1543,11 @@ tr:hover td { background: rgba(255,255,255,0.015); }
   </div>
 
   <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Drop Off Location Mix <span id="mb-dropoff-label" style="font-size:10px;font-weight:400;color:var(--cyan);font-family:'IBM Plex Mono',monospace;margin-left:8px;"></span></div>
+    <div class="card-title">Product Category Mix <span id="mb-dropoff-label" style="font-size:10px;font-weight:400;color:var(--cyan);font-family:'IBM Plex Mono',monospace;margin-left:8px;"></span></div>
     <table style="width:100%;font-size:12px;font-family:'IBM Plex Mono',monospace;">
       <thead>
         <tr style="border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);">
-          <th style="text-align:left;padding:8px 6px;">Drop Off Location</th>
+          <th style="text-align:left;padding:8px 6px;">Product Category</th>
           <th style="text-align:center;padding:8px 6px;">Orders</th>
           <th style="text-align:center;padding:8px 6px;">Units</th>
           <th style="text-align:center;padding:8px 6px;">% of Orders</th>
@@ -5227,8 +5227,8 @@ function fcPrepareTrainingData() {
   // Compute max units for normalization
   const maxUnits = Math.max(...sortedHours.map(s => s.units), 1);
 
-  // Feature size per timestep: units_norm + sin_hour + cos_hour + day_onehot + cat_onehot
-  const featureSize = 1 + 2 + days.length + categories.length;
+  // Feature size per timestep: units_norm + sin_hour + cos_hour + day_onehot + promo_binary
+  const featureSize = 1 + 2 + days.length + 1;
 
   // Build sliding-window sequences and multi-output targets
   const sequences = [];
@@ -5247,7 +5247,7 @@ function fcPrepareTrainingData() {
         s.units / maxUnits,
         Math.sin(hourRad), Math.cos(hourRad),
         ...days.map(d => d === s.day ? 1 : 0),
-        ...categories.map(c => c === s.category ? 1 : 0)
+        s.category === 'Promo' ? 1 : 0
       ]);
     }
     sequences.push(seq);
@@ -6204,7 +6204,7 @@ function drawDropOffMixTable(prefix, filteredOrders, totalOrders) {
 
   const stats = {};
   for(const [, o] of filteredOrders) {
-    const key = o.dropOffLocation || 'Unknown';
+    const key = prefix === 'mb' ? (o.productCategory || 'Other') : (o.dropOffLocation || 'Unknown');
     if(!stats[key]) stats[key] = { orders: 0, units: 0 };
     stats[key].orders += 1;
     stats[key].units += o.units;
