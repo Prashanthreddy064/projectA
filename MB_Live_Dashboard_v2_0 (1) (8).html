@@ -5161,7 +5161,7 @@ const FC_DAY_ORDER = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday
 const FC_HOURS = [];
 (function() {
   for(let h = 6; h <= 23; h++) FC_HOURS.push(h);
-  FC_HOURS.push(0); FC_HOURS.push(1); FC_HOURS.push(2);
+  for(let h = 0; h <= 5; h++) FC_HOURS.push(h);
 })();
 
 function opHourIndex(hour) {
@@ -5194,10 +5194,10 @@ function fcPrepareTrainingData() {
   const topBrands = sortedBrands.slice(0, FC_MAX_BRANDS).map(([b]) => b);
   const brands = [...topBrands, 'Other'];
 
-  // Aggregate by date+hour for sequence building
+  // Aggregate by date+hour+category for sequence building (separates Promo / Non-Promo)
   const hourlyAgg = {};
   uploadedTxAll.forEach(r => {
-    const key = `${r.dateValue}|${r.hour}`;
+    const key = `${r.dateValue}|${r.hour}|${r.promoType || 'Unknown'}`;
     if(!hourlyAgg[key]) {
       hourlyAgg[key] = {
         date: r.dateValue, hour: r.hour,
@@ -6121,6 +6121,76 @@ function renderOrderView(prefix, orders, rowsWithOrders, showNonTCW) {
   drawOrdersDonut(catEntries, Math.max(totalOrders, 1), prefix + '-donut-canvas');
   drawOrdersHourlyChart(prefix, orders);
   drawDropOffMixTable(prefix, filteredOrders, totalOrders);
+}
+
+function drawOrdersDonut(catEntries, totalOrders, canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const size = Math.min(canvas.parentElement.clientWidth - 20, 300);
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  ctx.clearRect(0, 0, size, size);
+
+  if(!catEntries.length) {
+    ctx.fillStyle = '#475569';
+    ctx.font = '12px "IBM Plex Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('No data', size / 2, size / 2);
+    return;
+  }
+
+  const cx = size / 2;
+  const cy = size / 2;
+  const outerR = size / 2 - 10;
+  const innerR = outerR * 0.55;
+  let startAngle = -Math.PI / 2;
+
+  catEntries.forEach(([cat, st], idx) => {
+    const sliceAngle = (st.orders / totalOrders) * 2 * Math.PI;
+    const color = OM_CAT_COLORS[idx % OM_CAT_COLORS.length];
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, outerR, startAngle, startAngle + sliceAngle);
+    ctx.arc(cx, cy, innerR, startAngle + sliceAngle, startAngle, true);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.85;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Label for slices > 5%
+    if(st.orders / totalOrders > 0.05) {
+      const midAngle = startAngle + sliceAngle / 2;
+      const labelR = (outerR + innerR) / 2;
+      const lx = cx + Math.cos(midAngle) * labelR;
+      const ly = cy + Math.sin(midAngle) * labelR;
+      const pct = ((st.orders / totalOrders) * 100).toFixed(0) + '%';
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px "IBM Plex Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(pct, lx, ly);
+    }
+
+    startAngle += sliceAngle;
+  });
+
+  // Center text
+  ctx.fillStyle = '#e2e8f0';
+  ctx.font = 'bold 16px "IBM Plex Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(totalOrders.toLocaleString(), cx, cy - 8);
+  ctx.fillStyle = '#64748b';
+  ctx.font = '10px "IBM Plex Mono", monospace';
+  ctx.fillText('orders', cx, cy + 10);
 }
 
 function drawDropOffMixTable(prefix, filteredOrders, totalOrders) {
